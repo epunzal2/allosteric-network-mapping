@@ -176,6 +176,3 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-
-# Ignore large trajectory files
-trajectory_analysis_files/*.dcd
