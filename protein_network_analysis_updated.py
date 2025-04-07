@@ -789,7 +789,7 @@ if __name__ == "__main__":
 
     # Analysis Parameters
     parser.add_argument("--cov_type", choices=['coordinate', 'displacement_mean_dot', 'displacement_dot_mean'],
-                        default='coordinate',
+                        default='displacement_mean_dot',
                         help="Type of raw covariance matrix calculation: "
                              "'coordinate' (C-alpha coordinates), "
                              "'displacement_mean_dot' (Mean of Dot Products of unit C-alpha displacement deviations from mean), "
@@ -803,7 +803,7 @@ if __name__ == "__main__":
 
     # Filtering/Pruning Options
     # Note: The old --pruning_method argument is deprecated in favor of --filtering_mode
-    parser.add_argument("--filtering_mode", choices=['contact_only', 'original_ec', 'fragmentation_pruning'], default='fragmentation_pruning',
+    parser.add_argument("--filtering_mode", choices=['contact_only', 'original_ec', 'fragmentation_pruning'], default='original_ec',
                         help="Method for filtering/pruning graph edges: "
                              "'contact_only' (Apply only contact frequency filter), "
                              "'original_ec' (Apply contact freq filter + covariance magnitude filter during build), "

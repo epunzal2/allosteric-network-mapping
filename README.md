@@ -111,11 +111,11 @@ python protein_network_analysis_updated.py [PDB_FILE] [DCD_FILE] [START_RESID] [
 
 | Option | Description | Default |
 |---------|-------------|---------|
-| `--cov_type` | Covariance method: `coordinate`, `displacement_mean_dot`, `displacement_dot_mean` | `coordinate` |
+| `--cov_type` | Covariance method: `coordinate`, `displacement_mean_dot`, `displacement_dot_mean` | `displacement_mean_dot` |
 | `--contact_atoms` | Atoms for contact calc: `cbeta` or `calpha` | `calpha` |
 | `--contact_cutoff` | Contact distance cutoff in nm | `0.75` (7.5 Å) |
 | `--contact_freq` | Min contact frequency (0-1) | `0.5` |
-| `--filtering_mode` | Graph filtering: `contact_only`, `original_ec`, `fragmentation_pruning` | `fragmentation_pruning` |
+| `--filtering_mode` | Graph filtering: `contact_only`, `original_ec`, `fragmentation_pruning` | `original_ec` |
 | `-n` | Number of top critical residues to report | `10` |
 | `--out_image` | Output filename for network visualization | `protein_network.png` |
 
@@ -137,7 +137,11 @@ Use `--cov_type` to select.
 - **original_ec**:
   - Calculates a critical covariance magnitude cutoff (`E_c`) so that ~50% of possible edges remain.
   - Edges with |covariance| < `E_c` are excluded during graph construction.
-- **fragmentation_pruning** (default):
+- **original_ec** (default):
+  - Calculates a critical covariance magnitude cutoff (`E_c`) so that ~50% of possible edges remain.
+  - Edges with |covariance| < `E_c` are excluded during graph construction.
+
+- **fragmentation_pruning**:
   - Builds graph with contact + correlation weights.
   - Calculates a critical weight cutoff (`E_c`) such that removing edges with weight < `E_c` fragments ~50% of edges into disconnected subgraphs.
   - Closely follows the percolation-based pruning described in the paper.
@@ -165,7 +169,7 @@ Select via `--filtering_mode`.
 
 ## Example Commands
 
-Run with default settings (fragmentation pruning, coordinate covariance):
+Run with default settings (original_ec filtering, displacement_mean_dot covariance):
 
 ```bash
 python protein_network_analysis_updated.py trajectory_analysis_files/mdm2.pdb trajectory_analysis_files/mdm2.dcd 25 109
