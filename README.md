@@ -194,18 +194,11 @@ python protein_network_analysis_updated.py trajectory_analysis_files/mdm2.pdb tr
 - Proctor EA, Ding F, Dokholyan NV. *Discrete molecular dynamics*. Wiley Interdiscip Rev Comput Mol Sci. 2011.
 - Sethi A, Eargle J, Black AA, Luthey-Schulten Z. *Dynamical networks in tRNA:protein complexes*. Proc Natl Acad Sci USA. 2009.
 - Chem. Rev. 2016, 116, 6463−6487.
-- Relevant sections and equations are embedded in `entire_conversation_with_gemini2.5.txt`.
 
 ---
 
 ## Development Notes & Changelog
 
-- See `entire_conversation_with_gemini2.5.txt` for detailed methodology and design rationale.
-- See `refactoring_log.txt` for iterative improvements, including:
-  - Addition of multiple covariance methods.
-  - Implementation of percolation-based pruning.
-  - Flexible contact atom selection.
-  - Improved CLI and visualization.
 - The script is modular and can be extended for other network metrics or visualization styles.
 
 ---
