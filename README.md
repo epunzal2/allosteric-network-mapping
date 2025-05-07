@@ -47,7 +47,7 @@ The approach involves:
 - **Graph Filtering Options**:
   - Contact frequency only.
   - Covariance magnitude cutoff (original method).
-  - Percolation-based fragmentation pruning (paper method).
+  - Percolation-based fragmentation pruning (paper method):  applied after graph construction, designed to fragment the network at a critical threshold.
 - **Automated Critical Cutoff Calculation**:
   - Dynamically determines pruning thresholds to achieve ~50% graph fragmentation.
 - **Visualization**:

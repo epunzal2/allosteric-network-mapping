@@ -957,29 +957,86 @@ if __name__ == "__main__":
 
     # --- Step 9: Prune Graph (Fragmentation Method or None) ---
     # Only apply fragmentation pruning if selected and graph has edges
-    if args.filtering_mode == 'fragmentation_pruning' and graph_after_build.number_of_edges() > 0:
-         print("\n--- Applying Fragmentation Pruning ---")
-         # Rename the function call to reflect its purpose
-         final_graph = prune_graph_paper( # This function now specifically handles the fragmentation pruning
-             graph_after_build,
-             apply_critical_pruning=True # Always true if we reach here in this mode
-         )
-    elif args.filtering_mode == 'contact_only':
-         print("\n--- Skipping Pruning (contact_only mode) ---")
-         final_graph = graph_after_build
-    elif args.filtering_mode == 'original_ec':
-         print("\n--- Skipping Pruning (original_ec filtering applied during build) ---")
-         final_graph = graph_after_build
-    else: # Should not happen
-         final_graph = graph_after_build # Default to the built graph
+    fallback_attempted = False
+    fallback_ec = None
+    fallback_graph = None
+    fallback_path = None
+    fallback_path_length = float('inf')
+    fallback_mode = None
 
-    # --- Step 10: Determine Optimal Path ---
-    # Use the final graph after potential pruning
-    optimal_path_analysis_idx, path_length = find_optimal_path(
-        final_graph,
-        start_analysis_idx,
-        end_analysis_idx
-    )
+    if args.filtering_mode == 'fragmentation_pruning' and graph_after_build.number_of_edges() > 0:
+        print("\n--- Applying Fragmentation Pruning ---")
+        final_graph = prune_graph_paper(graph_after_build, apply_critical_pruning=True)
+
+        # Step 10: Try optimal path
+        optimal_path_analysis_idx, path_length = find_optimal_path(
+            final_graph, start_analysis_idx, end_analysis_idx)
+
+        if not optimal_path_analysis_idx:
+            print("\n[Fallback] No optimal path found after fragmentation pruning. Lowering Ec by 10% and retrying...")
+            # Get the Ec used for pruning
+            ec_used = find_critical_cutoff_paper(graph_after_build)
+            fallback_ec = ec_used * 0.9
+            print(f"[Fallback] Retrying with Ec = {fallback_ec:.6f} (10% lower than critical Ec {ec_used:.6f})")
+            # Manually prune with lower Ec
+            pruned_graph = graph_after_build.copy()
+            edges_to_remove = [(u, v) for u, v, d in pruned_graph.edges(data=True) if d['weight'] < fallback_ec]
+            pruned_graph.remove_edges_from(edges_to_remove)
+            fallback_graph = pruned_graph
+            fallback_path, fallback_path_length = find_optimal_path(
+                fallback_graph, start_analysis_idx, end_analysis_idx)
+            fallback_attempted = True
+            fallback_mode = 'lowered_ec'
+
+        if fallback_attempted and not fallback_path:
+            print("[Fallback] Still no path found. Switching to original_ec mode and retrying...")
+            # Compute original_ec cutoff
+            original_ec_cutoff_value = find_original_critical_ec(
+                n_analysis_nodes,
+                raw_cov_matrix,
+                contact_frequency,
+                args.contact_freq
+            )
+            print(f"[Fallback] Using original_ec cutoff value: {original_ec_cutoff_value:.6f}")
+            # Build and use original_ec graph
+            orig_ec_graph, _ = build_graph(
+                n_analysis_nodes=n_analysis_nodes,
+                analysis_idx_to_residue_obj_map=analysis_idx_residue_obj_map,
+                contact_frequency=contact_frequency,
+                normalized_cov_matrix=norm_cov_matrix,
+                contact_freq_cutoff=args.contact_freq,
+                filtering_mode='original_ec',
+                raw_covariance_matrix=raw_cov_matrix,
+                original_ec_cutoff=original_ec_cutoff_value
+            )
+            fallback_graph = orig_ec_graph
+            fallback_path, fallback_path_length = find_optimal_path(
+                fallback_graph, start_analysis_idx, end_analysis_idx)
+            fallback_mode = 'original_ec'
+
+        # Choose the best available path/graph
+        if fallback_attempted and fallback_path:
+            print(f"[Fallback] Path found using fallback mode: {fallback_mode}")
+            final_graph = fallback_graph
+            optimal_path_analysis_idx = fallback_path
+            path_length = fallback_path_length
+        elif not optimal_path_analysis_idx:
+            print("[Fallback] No optimal path found after all fallback attempts.")
+
+    elif args.filtering_mode == 'contact_only':
+        print("\n--- Skipping Pruning (contact_only mode) ---")
+        final_graph = graph_after_build
+        optimal_path_analysis_idx, path_length = find_optimal_path(
+            final_graph, start_analysis_idx, end_analysis_idx)
+    elif args.filtering_mode == 'original_ec':
+        print("\n--- Skipping Pruning (original_ec filtering applied during build) ---")
+        final_graph = graph_after_build
+        optimal_path_analysis_idx, path_length = find_optimal_path(
+            final_graph, start_analysis_idx, end_analysis_idx)
+    else: # Should not happen
+        final_graph = graph_after_build # Default to the built graph
+        optimal_path_analysis_idx, path_length = find_optimal_path(
+            final_graph, start_analysis_idx, end_analysis_idx)
 
     # Convert path back to original residue sequence numbers for reporting
     optimal_path_resids = []
@@ -1026,3 +1083,21 @@ if __name__ == "__main__":
         print(f"No optimal path found between {args.start_resid} and {args.end_resid}.")
     print(f"Top critical residues identified.")
     print(f"Visualization saved to: {os.path.join(args.output_dir, args.out_image)}")
+
+    # --- Run Configuration Section ---
+    print("\n===== Run Configuration =====")
+    print(f"Script: {os.path.basename(__file__)}")
+    print(f"Working Directory: {os.getcwd()}")
+    print(f"PDB File: {args.pdb_file}")
+    print(f"DCD File: {args.dcd_file}")
+    print(f"Start Residue: {args.start_resid}")
+    print(f"End Residue: {args.end_resid}")
+    print(f"Output Directory: {args.output_dir}")
+    print(f"Covariance Type (--cov_type): {args.cov_type}")
+    print(f"Contact Cutoff (--contact_cutoff): {args.contact_cutoff}")
+    print(f"Contact Frequency Threshold (--contact_freq): {args.contact_freq}")
+    print(f"Contact Atoms (--contact_atoms): {args.contact_atoms}")
+    print(f"Filtering Mode (--filtering_mode): {args.filtering_mode}")
+    print(f"Top N Critical Residues (-n/--top_n_critical): {args.top_n_critical}")
+    print(f"Output Image (--out_image): {args.out_image}")
+    print("============================\n")
