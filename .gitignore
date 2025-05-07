@@ -1,4 +1,3 @@
-refactoring*txt
 entire*txt
 commit*txt
 
@@ -176,3 +175,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+TASKS.md
+test_may2025/
+CHANGELOG.md
