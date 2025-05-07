@@ -779,9 +779,13 @@ def visualize_network(graph, pos, optimal_path, critical_residues_idx, filename=
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate optimal paths and critical residues in protein networks based on MD trajectory analysis.")
 
+    # Input/Output directories
+    parser.add_argument("--input_dir", default=".", help="Directory containing input files. Default: current directory.")
+    parser.add_argument("--output_dir", default=".", help="Directory for output files. Default: current directory.")
+    
     # Input files
-    parser.add_argument("pdb_file", help="Path to the PDB file (topology).")
-    parser.add_argument("dcd_file", help="Path to the DCD file (trajectory).")
+    parser.add_argument("pdb_file", help="Path to the PDB file (topology). If --input_dir is specified, this will be relative to that directory.")
+    parser.add_argument("dcd_file", help="Path to the DCD file (trajectory). If --input_dir is specified, this will be relative to that directory.")
 
     # Path definition
     parser.add_argument("start_resid", type=int, help="Residue sequence number (1-based) for the start of the path.")
@@ -813,7 +817,7 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--top_n_critical", type=int, default=10,
                         help="Number of top critical residues (by betweenness centrality) to report and highlight.")
     parser.add_argument("--out_image", default="protein_network.png",
-                        help="Filename for the output network visualization graph.")
+                        help="Filename for the output network visualization graph. If --output_dir is specified, the file will be saved there.")
 
     args = parser.parse_args()
 
@@ -821,7 +825,17 @@ if __name__ == "__main__":
     overall_start_time = time.time()
 
     # --- Step 1: Load Trajectory ---
-    traj = load_trajectory(args.pdb_file, args.dcd_file)
+    import os
+    # Construct full paths for input files
+    pdb_path = os.path.join(args.input_dir, args.pdb_file)
+    dcd_path = os.path.join(args.input_dir, args.dcd_file)
+    print(f"Using input directory: {args.input_dir}")
+    print(f"Using output directory: {args.output_dir}")
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    traj = load_trajectory(pdb_path, dcd_path)
 
     # --- Step 2: Setup Mappings ---
     # Map residue sequence numbers (1-based from PDB) to internal 0-based residue indices
@@ -994,7 +1008,7 @@ if __name__ == "__main__":
              node_positions,
              optimal_path_analysis_idx,
              critical_residues_analysis_idx.keys(), # Pass only the indices
-             filename=args.out_image
+             filename=os.path.join(args.output_dir, args.out_image)
          )
     else:
          print("Skipping visualization as the pruned graph has no nodes.")
@@ -1008,4 +1022,4 @@ if __name__ == "__main__":
     else:
         print(f"No optimal path found between {args.start_resid} and {args.end_resid}.")
     print(f"Top critical residues identified.")
-    print(f"Visualization saved to: {args.out_image}")
+    print(f"Visualization saved to: {os.path.join(args.output_dir, args.out_image)}")
