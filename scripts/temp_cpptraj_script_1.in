@@ -1,0 +1,26 @@
+# cpptraj input: temp_cpptraj_script_1.in (generated, with strip)
+
+parm Data/AF2_LM211_WT/calcium/af2_lm211_wt_ca2+.parm7
+trajin Data/AF2_LM211_WT/calcium/af2_lm211_wt_calcium_1.dcd
+
+# 1. Strip solvent (water).
+# This modifies the current default topology for subsequent commands.
+strip :WAT
+
+# 2. Autoimage to fix periodic boundary conditions (on the stripped system)
+autoimage
+
+# 3. RMS fit to the C-alpha atoms of the protein in the first frame (on the stripped system)
+# The mask 'protein&@CA' selects C-alpha atoms of protein residues.
+rms first protein&@CA out rmsd_to_first_1.dat
+
+# 4. Output the processed trajectory (all frames, stripped of water)
+# This DCD will be smaller and faster to process later.
+trajout Data/AF2_LM211_WT/calcium/processed/af2_lm211_wt_calcium_1_processed.dcd dcd
+
+# 5. Output the first frame of the processed trajectory as a PDB file (stripped of water)
+# This PDB will be consistent with the processed DCD and used as topology for the Python script.
+trajout Data/AF2_LM211_WT/calcium/processed/af2_lm211_wt_ca2_processed_frame1.pdb pdb onlyframes 1
+
+run
+quit

@@ -1,0 +1,5 @@
+parm Data/AF2_LM211_WT/calcium/af2_lm211_wt_ca2+.parm7
+trajin Data/AF2_LM211_WT/calcium/af2_lm211_wt_calcium_1.dcd 1 1
+trajout Data/AF2_LM211_WT/calcium/af2_lm211_wt_ca2_frame1.pdb pdb
+run
+quit

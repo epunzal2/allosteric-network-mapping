@@ -1,0 +1,22 @@
+# cpptraj input template
+
+parm __PARM_FILE__
+trajin __INPUT_DCD__
+
+# 1. Strip solvent (water).
+strip :WAT
+
+# 2. Autoimage to fix periodic boundary conditions (on the stripped system)
+autoimage
+
+# 3. RMS fit to the C-alpha atoms of the protein in the first frame (on the stripped system)
+rms first protein&@CA out __OUTPUT_RMSD__
+
+# 4. Output the processed trajectory (all frames, stripped of water)
+trajout __OUTPUT_DCD__ dcd
+
+# 5. Output the first frame of the processed trajectory as a PDB file (stripped of water)
+trajout __OUTPUT_PDB__ pdb onlyframes 1
+
+run
+quit

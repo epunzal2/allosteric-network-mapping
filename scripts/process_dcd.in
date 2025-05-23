@@ -1,0 +1,23 @@
+# cpptraj input: process_dcd.in
+# Arg1: Input DCD path (relative to cpptraj CWD)
+# Arg2: Output processed DCD path (relative to cpptraj CWD)
+# Arg3: Output PDB path for the first frame (relative to cpptraj CWD)
+
+parm Data/AF2_LM211_WT/calcium/af2_lm211_wt_ca2+.parm7
+trajin $1
+
+# 1. Autoimage to fix periodic boundary conditions
+autoimage
+
+# 2. RMS fit to the C-alpha atoms of the first frame
+rms ToFirstFrame first @CA out rmsd_to_first.dat
+
+# 3. Output the processed trajectory (all frames)
+trajout $2 dcd
+
+# 4. Output the first frame of the processed trajectory as a PDB file
+# This PDB will be consistent with the processed DCDs.
+trajout $3 pdb firstframe
+
+run
+quit
