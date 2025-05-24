@@ -1,5 +1,4 @@
-entire*txt
-commit*txt
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -179,5 +178,4 @@ cython_debug/
 
 TASKS.md
 # test_may2025/
-*txt
 # CHANGELOG.md

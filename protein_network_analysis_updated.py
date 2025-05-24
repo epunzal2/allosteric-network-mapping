@@ -5,6 +5,7 @@ import mdtraj as md
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
+from adjustText import adjust_text
 from tqdm import tqdm # Optional: for progress bars
 import warnings
 import time # To time functions
@@ -67,7 +68,7 @@ def select_atoms_for_contact(traj, atom_type='calpha', use_ca_for_gly=True):
     residues_with_valid_atom = []
     for res in topology.residues:
         # Skip residues not part of a standard protein chain (if needed, though usually handled by topology)
-        # if not res.is_protein: continue
+        if not res.is_protein: continue
 
         ca_index = ca_indices_map.get(res.index, -1)
         if ca_index == -1:
@@ -691,7 +692,7 @@ def visualize_network(graph, pos, optimal_path, critical_residues_idx, filename=
     start_time = time.time()
     plt.figure(figsize=(14, 14)) # Slightly larger figure
     ax = plt.gca()
-    ax.set_title("Protein Residue Network (Pruned Graph)")
+    ax.set_title("Protein Residue Network (Pruned Graph)", fontsize=32)
 
     node_colors = []
     node_sizes = []
@@ -702,8 +703,8 @@ def visualize_network(graph, pos, optimal_path, critical_residues_idx, filename=
     path_nodes = set(optimal_path) if optimal_path else set()
     critical_nodes = set(critical_residues_idx)
 
-    max_size = 250
-    med_size = 120
+    max_size = 320
+    med_size = 160
     min_size = 40
 
     for node in graph.nodes():
@@ -762,9 +763,18 @@ def visualize_network(graph, pos, optimal_path, critical_residues_idx, filename=
          if node in path_nodes or node in critical_nodes:
              labels[node] = graph.nodes[node]['label'] # Use stored label (e.g., "TYR504")
 
-    # Draw labels with slight offset
+    # Draw labels with slight offset, using adjustText to prevent overlap
     label_pos = {k: (v[0], v[1] + 0.02) for k, v in pos.items()} # Adjust offset as needed
-    nx.draw_networkx_labels(graph, pos=label_pos, labels=labels, font_size=7, ax=ax, font_weight='bold')
+    texts = []
+    for node, (x_coord, y_coord) in label_pos.items():
+        if node in labels: # Ensure we only add texts for nodes that have labels
+            texts.append(plt.text(x_coord, y_coord, labels[node], fontsize=12, fontweight='bold'))
+    
+    if texts: # Only call adjust_text if there are labels to adjust
+        print(f"Adjusting {len(texts)} text labels to minimize overlap...")
+        adjust_text(texts,
+                    # arrowprops=dict(arrowstyle='-', color='black', lw=0.5) # Optional: draw lines to nodes
+                   )
 
     plt.axis('off') # Hide axes
     plt.tight_layout()
@@ -795,7 +805,7 @@ if __name__ == "__main__":
 
     # Analysis Parameters
     parser.add_argument("--cov_type", choices=['coordinate', 'displacement_mean_dot', 'displacement_dot_mean'],
-                        default='displacement_mean_dot',
+                        default='displacement_dot_mean',
                         help="Type of raw covariance matrix calculation: "
                              "'coordinate' (C-alpha coordinates), "
                              "'displacement_mean_dot' (Mean of Dot Products of unit C-alpha displacement deviations from mean), "
