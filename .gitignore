@@ -9,6 +9,7 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+.DS_Store
 .Python
 build/
 develop-eggs/
@@ -18,7 +19,7 @@ eggs/
 .eggs/
 lib/
 lib64/
-logs/
+# logs/
 parts/
 sdist/
 var/
@@ -179,3 +180,4 @@ cython_debug/
 TASKS.md
 # test_may2025/
 # CHANGELOG.md
+verification/

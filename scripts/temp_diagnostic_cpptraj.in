@@ -1,0 +1,8 @@
+parm ./Data/AF2_LM211_WT/calcium/processed/af2_lm211_wt_ca2+.parm7
+parmstrip :WAT
+parmstrip :CA
+parmstrip :Cl-
+trajin ./Data/AF2_LM211_WT/calcium/processed/af2_lm211_wt_calcium_1_processed.dcd 1 1 1
+trajout ./Data/AF2_LM211_WT/calcium/processed/af2_lm211_wt_calcium_1_processed_frame1_test.pdb pdb
+run
+quit

@@ -703,24 +703,40 @@ def visualize_network(graph, pos, optimal_path, critical_residues_idx, filename=
     path_nodes = set(optimal_path) if optimal_path else set()
     critical_nodes = set(critical_residues_idx)
 
+    start_node_of_path = optimal_path[0] if optimal_path else None
+    end_node_of_path = optimal_path[-1] if optimal_path else None
+
     max_size = 320
     med_size = 160
     min_size = 40
+    start_end_node_size = max_size * 0.9 # Slightly smaller than critical on path, but distinct
+
+    start_end_color = 'forestgreen' # Color for start and end nodes of the path
+    critical_on_path_color = 'purple'
+    path_other_color = 'red'
+    critical_off_path_color = 'orange'
+    default_color = 'lightblue'
+
 
     for node in graph.nodes():
-        is_path = node in path_nodes
+        is_start_or_end_node = (node == start_node_of_path or node == end_node_of_path) and optimal_path is not None
+        is_on_path = node in path_nodes
         is_critical = node in critical_nodes
-        if is_path and is_critical:
-            node_colors.append('purple') # Critical node on path
+
+        if is_start_or_end_node:
+            node_colors.append(start_end_color)
+            node_sizes.append(start_end_node_size)
+        elif is_on_path and is_critical:
+            node_colors.append(critical_on_path_color) # Critical node on path (not start/end)
             node_sizes.append(max_size)
-        elif is_path:
-            node_colors.append('red')    # Path node
+        elif is_on_path:
+            node_colors.append(path_other_color)    # Other path node (not start/end, not critical)
             node_sizes.append(max_size * 0.8)
         elif is_critical:
-            node_colors.append('orange') # Critical node (not on path)
+            node_colors.append(critical_off_path_color) # Critical node (not on path)
             node_sizes.append(med_size)
         else:
-            node_colors.append('lightblue') # Normal node
+            node_colors.append(default_color) # Normal node
             node_sizes.append(min_size)
 
     # Determine edge properties

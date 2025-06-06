@@ -1,6 +1,7 @@
 mdtraj
 numpy
 matplotlib
+adjustText
 MDAnalysis
 networkx
 scikit-learn

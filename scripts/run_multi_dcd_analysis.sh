@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e # Exit immediately if a command exits with a non-zero status.
 
 # Script to run protein network analysis for multiple DCD files (runs 1, 2, 3)
 # using the same PDB file and specified parameters.
@@ -6,10 +7,10 @@
 # --- Configuration (based on user example) ---
 # PDB files will be dynamically determined based on DCD_FILE_BASENAME and run number.
 # Example: Data/AF2_LM211_WT/sodium/processed/af2_lm211_wt_sodium_1_processed_frame1.pdb
-DCD_FILE_BASENAME="Data/AF2_LM211_WT/sodium/processed/af2_lm211_wt_sodium"
+DCD_FILE_BASENAME="Data/AF2_LM211_WT/calcium/processed/af2_lm211_wt_calcium"
 
 START_RESIDUE="101"
-END_RESIDUE="225"
+END_RESIDUE="809"
 
 COV_TYPE="displacement_mean_dot"
 FILTERING_MODE="original_ec"

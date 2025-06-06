@@ -1,0 +1,6 @@
+parm af2_lm2_y138h_11_mutant_ca2+.parm7
+parmstrip :WAT
+parmstrip :CA
+parmstrip :Cl-
+trajin concatenated.dcd 1 1 1
+trajout frame1.pdb pdb
