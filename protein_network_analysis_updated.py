@@ -830,12 +830,12 @@ if __name__ == "__main__":
                         help="Number of top critical residues (by betweenness centrality) to report and highlight.")
     parser.add_argument("--out_image", default="protein_network.png",
                         help="Filename for the output network visualization graph. If --output_dir is specified, the file will be saved there.")
-
+ 
     args = parser.parse_args()
-
+ 
     print("--- Starting Protein Network Analysis ---")
     overall_start_time = time.time()
-
+ 
     # --- Step 1: Load Trajectory ---
     import os
     print(f"Using output directory: {args.output_dir}")
