@@ -5,18 +5,27 @@ trajin __INPUT_DCD__
 
 # 1. Strip solvent (water).
 strip :WAT
+strip :CA
+strip :Cl-
 
 # 2. Autoimage to fix periodic boundary conditions (on the stripped system)
 autoimage
 
-# 3. RMS fit to the C-alpha atoms of the protein in the first frame (on the stripped system)
-rms first protein&@CA out __OUTPUT_RMSD__
+# # 3. RMS fit to the C-alpha atoms of the protein in the first frame (on the stripped system)
+# rms first protein&@CA out __OUTPUT_RMSD__
 
 # 4. Output the processed trajectory (all frames, stripped of water)
 trajout __OUTPUT_DCD__ dcd
 
 # 5. Output the first frame of the processed trajectory as a PDB file (stripped of water)
-trajout __OUTPUT_PDB__ pdb onlyframes 1
+# This uses __OUTPUT_DCD__ (the full processed trajectory saved to disk) as the source.
+clear trajin
+parm __PARM_FILE__ # Assumes __PARM_FILE__ is the correct topology for __OUTPUT_DCD__
+parmstrip :WAT
+parmstrip :CA
+parmstrip :Cl-
+trajin __OUTPUT_DCD__ 1 1 1
+trajout __OUTPUT_PDB__ pdb
 
 run
 quit
