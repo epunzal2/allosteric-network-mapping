@@ -356,4 +356,112 @@ def main():
     # For simplicity, we'll assume paths are correct as given or relative to CWD.
     # If script is in 'scripts/' and data_dir is 'allosteric-network-mapping/...',
     # and CWD is workspace root, then Path(args.data_dir) works.
-    # If CWD is 'scripts
+    # If CWD is 'scripts/', then Path('../' + args.data_dir) might be needed.
+    # The problem implies the script is in scripts/ and paths are relative to workspace.
+
+    analysis_report_files = find_analysis_reports(base_data_dir)
+
+    if not analysis_report_files:
+        logger.warning(f"No 'analysis_report.txt' files found in {base_data_dir.resolve()}")
+        generate_markdown_report([], [], [], output_report_path, args.residue_group, target_residues)
+        logger.info("Generated an empty report as no analysis files were found.")
+        return
+
+    all_collected_data = []
+    wt_summary_entries = []
+    mutant_summary_entries = []
+    logger.info(f"Processing {len(analysis_report_files)} report files.")
+
+    for i, report_file_path in enumerate(analysis_report_files):
+        logger.info(f"Processing report {i+1}/{len(analysis_report_files)}: {report_file_path}")
+        optimal_path_nodes, critical_nodes = parse_analysis_report(report_file_path)
+        
+        found_in_optimal_target = target_residues.intersection(optimal_path_nodes)
+        found_in_critical_target = target_residues.intersection(critical_nodes)
+        logger.debug(f"Report: {report_file_path} - Target in optimal: {found_in_optimal_target}, Target in critical: {found_in_critical_target}")
+        
+        relative_sim_path_str = ""
+        try:
+            # .parent to make path like Data/ProteinType/...
+            relative_sim_path = report_file_path.relative_to(base_data_dir.parent)
+            relative_sim_path_str = str(relative_sim_path)
+        except ValueError:
+            relative_sim_path_str = str(report_file_path) # fallback
+            logger.warning(f"Could not make path relative for {report_file_path}")
+
+        all_collected_data.append({
+            "simulation_path": relative_sim_path_str,
+            "optimal_path_found_residues": found_in_optimal_target,
+            "critical_path_found_residues": found_in_critical_target,
+        })
+
+        # For summary
+        res1_str, res2_str = extract_input_residues_from_path(relative_sim_path_str)
+        input_pair_display_str = "UnknownPair"
+        set_res1, set_res2 = set(), set()
+
+        if res1_str:
+            try:
+                set_res1 = parse_residue_group(res1_str)
+            except ValueError as e_parse:
+                logger.warning(f"Could not parse input residue res1_str '{res1_str}' from path {relative_sim_path_str} for summary: {e_parse}")
+        if res2_str:
+            try:
+                set_res2 = parse_residue_group(res2_str)
+            except ValueError as e_parse:
+                logger.warning(f"Could not parse input residue res2_str '{res2_str}' from path {relative_sim_path_str} for summary: {e_parse}")
+        
+        if res1_str and res2_str:
+             input_pair_display_str = f"{res1_str}_{res2_str}"
+        elif res1_str:
+            input_pair_display_str = res1_str # Should ideally not happen if pair extraction is robust
+        
+        input_residues_for_current_sim = set_res1.union(set_res2)
+        
+        is_overlap_with_input = bool(target_residues.intersection(input_residues_for_current_sim))
+        if is_overlap_with_input:
+            logger.debug(f"Target residues {target_residues} overlap with input pair {input_pair_display_str} (parsed as {input_residues_for_current_sim}) for {relative_sim_path_str}")
+
+        # Check if target is found in optimal path *excluding* its presence as an input residue
+        optimal_path_intermediate_nodes = optimal_path_nodes - input_residues_for_current_sim
+        found_target_as_intermediate_in_optimal = target_residues.intersection(optimal_path_intermediate_nodes)
+        
+        # Similar logic for critical nodes (if summary for critical is added later)
+        # critical_nodes_intermediate = critical_nodes - input_residues_for_current_sim
+        # found_target_as_intermediate_in_critical = target_residues.intersection(critical_nodes_intermediate)
+
+        if bool(found_target_as_intermediate_in_optimal):
+            logger.info(f"SUMMARY CHECK: Target {target_residues} FOUND as INTERMEDIATE in optimal path {found_target_as_intermediate_in_optimal} for {relative_sim_path_str} (Inputs: {input_residues_for_current_sim}, Original Optimal: {optimal_path_nodes})")
+        elif bool(found_in_optimal_target):
+             logger.info(f"SUMMARY CHECK: Target {target_residues} was in optimal path for {relative_sim_path_str} BUT ONLY AS INPUT. (Inputs: {input_residues_for_current_sim}, Original Optimal: {optimal_path_nodes})")
+        else:
+            logger.info(f"SUMMARY CHECK: Target {target_residues} NOT in optimal path for {relative_sim_path_str} (Original Optimal: {optimal_path_nodes})")
+        
+        summary_entry = {
+            'input_residue_pair_str': input_pair_display_str,
+            'is_overlap_with_input': is_overlap_with_input,
+            'has_target_in_optimal_as_intermediate': bool(found_target_as_intermediate_in_optimal),
+            'intermediate_target_residues_found': found_target_as_intermediate_in_optimal # Store the actual set
+            # 'has_target_in_critical_as_intermediate': bool(found_target_as_intermediate_in_critical), # If needed
+            # 'intermediate_critical_target_residues_found': found_target_as_intermediate_in_critical # If needed
+        }
+        
+        # Categorize for summary based on the ProteinType directory name
+        path_parts = Path(relative_sim_path_str).parts
+        if len(path_parts) > 1:
+            protein_type_dir = path_parts[1].upper() # e.g., AF2_LM211_WT or AF2_LM2_Y138H_11_MUTANT
+            if "_WT" in protein_type_dir:
+                wt_summary_entries.append(summary_entry)
+            elif "_MUTANT" in protein_type_dir: # Assuming MUTANT is present in the name
+                mutant_summary_entries.append(summary_entry)
+            else:
+                logger.warning(f"Could not categorize {relative_sim_path_str} as WT or Mutant for summary.")
+        else:
+            logger.warning(f"Path {relative_sim_path_str} too short to categorize for summary.")
+
+
+    generate_markdown_report(all_collected_data, wt_summary_entries, mutant_summary_entries, output_report_path, args.residue_group, target_residues)
+    logger.info("Script execution finished successfully.")
+
+if __name__ == "__main__":
+    main()
