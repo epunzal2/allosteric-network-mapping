@@ -141,7 +141,7 @@ def load_residue_notes(csv_filepath):
 def main():
     logger.info("--- Script execution started ---")
     
-    output_filename = "analysis_results/extended_report.md"
+    output_filename = "analysis_results/reports/extended_report.md"
     report_content = []
 
     logger.info("Starting main report generation process.")
