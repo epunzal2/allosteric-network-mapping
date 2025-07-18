@@ -83,9 +83,9 @@ def visualize_paths(session, system_name, category, paths, output_dir):
     """
     # Load structure
     if system_name == 'WT':
-        pdb_file = 'Data/AF2_LM211_WT/calcium/frame1.pdb'
+        pdb_file = 'Data/AF2_LM211_WT/calcium/frame1_CA.pdb'
     else:
-        pdb_file = 'Data/AF2_LM2_Y138H_11_Mutant/calcium/frame1.pdb'
+        pdb_file = 'Data/AF2_LM2_Y138H_11_Mutant/calcium/frame1_CA.pdb'
 
     run(session, f'open {pdb_file}')
 
@@ -94,6 +94,25 @@ def visualize_paths(session, system_name, category, paths, output_dir):
     run(session, 'show cartoon')
     run(session, 'color light gray')
     run(session, 'label delete') # Clear all labels
+
+    # Check for and visualize Calcium ions
+    calcium_selection = "#1:918-928"
+    
+    # Programmatically select atoms to check for existence
+    # Use run command to select and check for existence
+    # Use run command to select and check for existence
+    selected_atoms = run(session, f'select {calcium_selection}')
+    
+    # The result of the select command tells us if atoms were selected
+    if selected_atoms and len(selected_atoms.atoms) > 0:
+        logging.info(f"Calcium ions found ({len(selected_atoms.atoms)} atoms), visualizing them.")
+        # Use run for visualization commands
+        run(session, f'show {calcium_selection} atoms')
+        run(session, f'style {calcium_selection} sphere')
+        run(session, f'color {calcium_selection} purple')
+        run(session, f'size {calcium_selection} atomRadius 1.0')
+    else:
+        logging.info("No Calcium ions found in the structure.")
 
     # Expanded color palette
     colors = [
@@ -171,6 +190,7 @@ def visualize_paths(session, system_name, category, paths, output_dir):
     res101_resname = get_resname(session, 101)
     run(session, f'label {res101_selection} text "{res101_resname}101" color magenta')
 
+    # Save image and session only if GUI is available
     # Save image and session
     output_base = os.path.join(output_dir, f"{category}_{system_name}")
     run(session, f'save "{output_base}.png" width 800 height 600')
@@ -191,7 +211,7 @@ def main(session):
                         format='%(asctime)s - %(levelname)s - %(message)s',
                         filemode='w')
 
-    markdown_file = 'analysis_results/optimal_paths_details.md'
+    markdown_file = 'analysis_results/reports/optimal_paths_details.md'
     output_dir = 'analysis_results/chimera_visualizations/'
 
     if not os.path.exists(output_dir):
