@@ -7,39 +7,36 @@ import os
 import logging
 from datetime import datetime
 import re
-import argparse
 
-def parse_optimal_paths(content):
+def parse_markdown_table(md_content):
     """
-    Parses optimal_paths_details.md to extract relevant data.
+    Parses markdown content to extract data from tables under specific categories.
     """
-    data = []
-    current_category = None
-    for line in content.split('\n'):
-        if line.startswith('## Category:'):
-            current_category = line.replace('## Category:', '').strip()
-        elif '|' in line and 'System' not in line and '---' not in line:
+    categories = re.split(r'## Category: ', md_content)[1:]
+    all_data = {}
+
+    for category_block in categories:
+        lines = category_block.strip().split('\n')
+        category_name = lines[0].strip()
+        
+        table_lines = [line for line in lines if '|' in line and '---' not in line and 'System' not in line]
+        
+        data = []
+        for line in table_lines:
             parts = [p.strip() for p in line.split('|') if p.strip()]
             if len(parts) == 7:
-                system, residue_pair, _, _, _, _, optimal_path = parts
-                data.append([current_category, residue_pair, system, optimal_path])
-    
-    return pd.DataFrame(data, columns=['Category', 'Residue Pair', 'System', 'Optimal Path Residues'])
+                system, _, _, nodes, path_length, _, _ = parts
+                data.append([system, nodes, path_length])
 
-def parse_extended_report(content):
-    """
-    Parses extended_report.md to extract common optimal residues.
-    """
-    common_residues_map = {}
-    pattern = re.compile(r"\| ([\d\-]+) \|.*?\| \*\*Comparison\*\* \|.*?\| Common Optimal Residues: ([\w\s,]+) \(\d+ shared\)")
-    for line in content.split('\n'):
-        match = pattern.search(line)
-        if match:
-            residue_pair = match.group(1)
-            common_residues_str = match.group(2).strip()
-            if common_residues_str.lower() != 'n/a':
-                common_residues_map[residue_pair] = [res.strip() for res in common_residues_str.split(',')]
-    return common_residues_map
+        df = pd.DataFrame(data, columns=['System', 'Nodes', 'Path Length'])
+        
+        # Clean and convert data
+        df['Nodes'] = pd.to_numeric(df['Nodes'], errors='coerce')
+        df['Path Length'] = pd.to_numeric(df['Path Length'], errors='coerce')
+        
+        all_data[category_name] = df
+
+    return all_data
 
 def cohen_d(x, y):
     """
@@ -72,23 +69,7 @@ def interpret_cohen_d(d):
     else:
         return f"d={d:.4f} (Large effect size)."
 
-def plot_jaccard_similarity(data, category, plot_dir):
-    """
-    Generates and saves a bar plot for Jaccard similarities.
-    """
-    plt.figure(figsize=(12, 7))
-    sns.barplot(x='Jaccard Similarity', y='Residue Pair', data=data, palette='viridis')
-    plt.title(f'Jaccard Similarity of Optimal Paths for {category}')
-    plt.xlabel('Jaccard Similarity')
-    plt.ylabel('Residue Pair')
-    plt.tight_layout()
-    plot_filename = f"jaccard_similarity_{category.replace(' ', '_')}.png"
-    plot_filepath = os.path.join(plot_dir, plot_filename)
-    plt.savefig(plot_filepath)
-    plt.close()
-    return plot_filepath
-
-def run_analysis(optimal_paths_df, common_residues_map, output_dir, plot_dir, log_file):
+def run_analysis(data_by_category, output_dir, plot_dir, log_file):
     """
     Performs statistical analysis and generates a report.
     """
@@ -99,135 +80,56 @@ def run_analysis(optimal_paths_df, common_residues_map, output_dir, plot_dir, lo
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(plot_dir, exist_ok=True)
 
-    jaccard_results = []
-    shared_residue_analysis = []
-
     with open(report_path, 'w') as f:
         f.write("# Statistical Analysis Report\n\n")
-        f.write("This report presents a statistical comparison of optimal path similarity using the Jaccard index and an analysis of shared intermediate residues between WT and Mutant systems.\n\n")
+        f.write("This report presents a statistical comparison of 'Nodes' and 'Path Length' between WT and Mutant systems across the four categories found in the data file. The analysis aims to determine if there are significant differences between the two systems for these metrics.\n\n")
+        f.write("### Understanding the Statistics\n\n")
+        f.write("**Null Hypothesis:** For each test, the null hypothesis (H0) states that there is no significant difference between the distributions of the WT and Mutant groups. A low p-value (typically < 0.05) suggests that we can reject this hypothesis, indicating a statistically significant difference.\n\n")
+        f.write("**Not Significant:** A non-significant result (p-value >= 0.05) means that any observed differences between the groups are likely due to random chance, and there is not enough evidence to conclude that the groups are truly different.\n\n")
 
-        categories = optimal_paths_df['Category'].unique()
-        for category in categories:
-            if "high contact" not in category.lower():
-                continue
-
-            f.write(f"## Category: {category}\n\n")
+        for category, df in data_by_category.items():
             logging.info(f"Processing category: {category}")
+            f.write(f"## Category: {category}\n\n")
 
-            category_df = optimal_paths_df[optimal_paths_df['Category'] == category]
-            residue_pairs = category_df['Residue Pair'].unique()
+            wt_data = df[df['System'] == 'WT'].dropna()
+            mutant_data = df[df['System'] == 'Mutant'].dropna()
             
-            category_jaccard_data = []
+            f.write(f"Number of entries: WT = {len(wt_data)}, Mutant = {len(mutant_data)}\n\n")
 
-            for pair in residue_pairs:
-                wt_row = category_df[(category_df['Residue Pair'] == pair) & (category_df['System'] == 'WT')]
-                mutant_row = category_df[(category_df['Residue Pair'] == pair) & (category_df['System'] == 'Mutant')]
+            results = []
+            interpretations = {}
+            for col in ['Nodes', 'Path Length']:
+                wt_series = wt_data[col]
+                mutant_series = mutant_data[col]
 
-                if not wt_row.empty and not mutant_row.empty:
-                    wt_path_str = wt_row.iloc[0]['Optimal Path Residues']
-                    mutant_path_str = mutant_row.iloc[0]['Optimal Path Residues']
+                if len(wt_series) > 1 and len(mutant_series) > 1:
+                    mwu_stat, mwu_p = mannwhitneyu(wt_series, mutant_series, alternative='two-sided')
+                    ks_stat, ks_p = ks_2samp(wt_series, mutant_series)
+                    effect_size = cohen_d(mutant_series, wt_series)
 
-                    if 'N/A' in wt_path_str or 'N/A' in mutant_path_str:
-                        continue
-
-                    wt_residues = set(wt_path_str.split(' -> '))
-                    mutant_residues = set(mutant_path_str.split(' -> '))
+                    results.append([col, f"{mwu_stat:.4f}", f"{mwu_p:.4f}", f"{ks_stat:.4f}", f"{ks_p:.4f}", f"{effect_size:.4f}"])
+                    interpretations[col] = {
+                        'mwu': interpret_p_value(mwu_p),
+                        'ks': interpret_p_value(ks_p),
+                        'cohen_d': interpret_cohen_d(effect_size)
+                    }
                     
-                    intersection = len(wt_residues.intersection(mutant_residues))
-                    union = len(wt_residues.union(mutant_residues))
+                    plot_data = pd.concat([
+                        pd.DataFrame({'Value': wt_series, 'System': 'WT'}),
+                        pd.DataFrame({'Value': mutant_series, 'System': 'Mutant'})
+                    ])
+
+                    plt.figure(figsize=(10, 6))
+                    ax = sns.boxplot(x='System', y='Value', data=plot_data, palette="Set2",
+                                     medianprops={'color': 'black', 'linewidth': 2})
                     
-                    jaccard_similarity = intersection / union if union > 0 else 0
-                    
-                    jaccard_results.append({
-                        'Category': category,
-                        'Residue Pair': pair,
-                        'Jaccard Similarity': jaccard_similarity
-                    })
-                    category_jaccard_data.append({'Residue Pair': pair, 'Jaccard Similarity': jaccard_similarity})
+                    ax.set_title(f'Distribution of {col} in {category}')
+                    plot_filename = f"{category.replace(' ', '_')}_{col}_boxplot.png"
+                    plot_filepath = os.path.join(plot_dir, plot_filename)
+                    plt.savefig(plot_filepath)
+                    plt.close()
+                    logging.info(f"Generated plot: {plot_filepath}")
 
-            if not category_jaccard_data:
-                f.write("No valid pairs for Jaccard similarity analysis.\n\n")
-                continue
-
-            # Jaccard Similarity Analysis
-            jaccard_df_category = pd.DataFrame(category_jaccard_data).sort_values(by='Jaccard Similarity', ascending=False)
-            
-            highest_sim = jaccard_df_category.iloc[0]
-            lowest_sim = jaccard_df_category.iloc[-1]
-
-            f.write("### Jaccard Similarity Analysis\n\n")
-            f.write(f"- **Highest Similarity Pair:** {highest_sim['Residue Pair']} ({highest_sim['Jaccard Similarity']:.4f})\n")
-            f.write(f"- **Lowest Similarity Pair:** {lowest_sim['Residue Pair']} ({lowest_sim['Jaccard Similarity']:.4f})\n\n")
-
-            plot_filepath = plot_jaccard_similarity(jaccard_df_category, category, plot_dir)
-            relative_plot_path = os.path.relpath(plot_filepath, output_dir)
-            f.write(f"![Jaccard Similarity for {category}]({relative_plot_path})\n\n")
-
-            # Shared Intermediate Residue Analysis
-            category_intermediate_residues = set()
-            for pair in residue_pairs:
-                if pair in common_residues_map:
-                    start_node, end_node = pair.split('-')
-                    common = set(common_residues_map[pair])
-                    intermediate = common - {start_node, end_node}
-                    category_intermediate_residues.update(intermediate)
-            
-            sorted_intermediates = sorted([int(r) for r in category_intermediate_residues if r.isdigit()])
-            
-            f.write("### Shared Intermediate Residue Analysis\n\n")
-            f.write(f"- **Total Unique Shared Intermediate Residues:** {len(sorted_intermediates)}\n")
-            if sorted_intermediates:
-                f.write(f"- **Shared Intermediate Residues List:** `{', '.join(map(str, sorted_intermediates))}`\n\n")
-            else:
-                f.write("- **Shared Intermediate Residues List:** None\n\n")
-
-            shared_residue_analysis.append({
-                'Category': category,
-                'Shared_Intermediate_Residues_Count': len(sorted_intermediates),
-                'Shared_Intermediate_Residues_List': ', '.join(map(str, sorted_intermediates))
-            })
-
-    # Save CSVs
-    jaccard_df = pd.DataFrame(jaccard_results)
-    jaccard_csv_path = os.path.join(output_dir, 'residue_pair_jaccard_similarity.csv')
-    jaccard_df.to_csv(jaccard_csv_path, index=False)
-    logging.info(f"Saved Jaccard similarity data to {jaccard_csv_path}")
-
-    shared_residue_df = pd.DataFrame(shared_residue_analysis)
-    shared_csv_path = os.path.join(output_dir, 'shared_residue_analysis.csv')
-    shared_residue_df.to_csv(shared_csv_path, index=False)
-    logging.info(f"Saved shared residue analysis to {shared_csv_path}")
-
-    logging.info(f"Report generated at {report_path}")
-
-def main():
-    parser = argparse.ArgumentParser(description="Run statistical analysis on protein path data.")
-    parser.add_argument('--optimal-paths', type=str, default='analysis_results/reports/optimal_paths_details.md', help='Path to the optimal paths details file.')
-    parser.add_argument('--extended-report', type=str, default='analysis_results/reports/extended_report.md', help='Path to the extended report file.')
-    args = parser.parse_args()
-
-    report_dir = 'analysis_results/reports'
-    plot_dir = 'analysis_results/plots/statistical_analysis'
-    log_dir = 'logs'
-    
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"statistical_analysis_{datetime.now().strftime('%Y-%m-%d')}.log")
-
-    try:
-        with open(args.optimal_paths, 'r') as f:
-            optimal_paths_content = f.read()
-        with open(args.extended_report, 'r') as f:
-            extended_report_content = f.read()
-
-        optimal_paths_df = parse_optimal_paths(optimal_paths_content)
-        common_residues_map = parse_extended_report(extended_report_content)
-        
-        run_analysis(optimal_paths_df, common_residues_map, report_dir, plot_dir, log_file)
-        
-    except FileNotFoundError as e:
-        logging.error(f"Input file not found: {e.filename}")
-    except Exception as e:
-        logging.error(f"An error occurred: {e}", exc_info=True)
-
-if __name__ == '__main__':
-    main()
+                else:
+                    results.append([col, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A'])
+                    logging.warning(f"
