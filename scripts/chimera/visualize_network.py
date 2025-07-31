@@ -105,7 +105,8 @@ def visualize_single_path(session,
                          category: str,
                          path_data: dict,
                          output_dir: str,
-                         residue_mapping: dict):
+                         residue_mapping: dict,
+                         use_raytracing: bool = False):
     """
     Visualize a single network path with clean wireframe background.
     """
@@ -135,9 +136,18 @@ def visualize_single_path(session,
         return
 
     # ── 1. basic scene setup ────────────────────────────────────────────
-    run(session, "set bgColor white")
+    run(session, "set bgColor white")  # Keep white for POV-Ray rendering
     run(session, "hide atoms")
     run(session, "hide cartoons")
+    
+    # Set POV-Ray preferences for high-quality rendering (only if using raytracing)
+    if use_raytracing:
+        try:
+            # Set POV-Ray executable path in preferences
+            session.user_settings.set('povray', 'povray_exe', '/opt/homebrew/bin/povray')
+            logging.info("POV-Ray path set in preferences")
+        except Exception as e:
+            logging.warning(f"Could not set POV-Ray path in preferences: {e}")
 
     # ── 2a. Set desired orientation ──────────────────────────────────
     run(session, "turn x 90")
@@ -170,10 +180,10 @@ def visualize_single_path(session,
         run(session, f"show {model_id} bonds")
         run(session, f"style {model_id} stick")
         
-        # Make all sticks thin and gray
+        # Make all sticks thin and light gray (closer to white)
         run(session, f"size {model_id} stickRadius 0.06")  # Very thin
-        run(session, f"color {model_id} gray")
-        run(session, f"transparency {model_id} 85")  # Very transparent
+        run(session, f"color {model_id} lightgray")
+        run(session, f"transparency {model_id} 99")  # Much more transparent
         
         # No silhouettes for clean look
         run(session, "graphics silhouettes false")
@@ -190,10 +200,10 @@ def visualize_single_path(session,
         
         logging.info(f"Styling single path: residues {seg} with color royalblue")
         
-        # Make path sticks thicker, colored, and translucent
+        # Make path sticks thicker, colored, and fully opaque for individual paths
         run(session, f"size {sel} stickRadius 0.35")  # Much thicker
         run(session, f"color {sel} royalblue")
-        run(session, f"transparency {sel} 30")  # Translucent
+        run(session, f"transparency {sel} 0")  # Fully opaque for individual paths
         
     except Exception as e:
         logging.error(f"Failed to style path: {e}")
@@ -204,7 +214,7 @@ def visualize_single_path(session,
         res101 = f"{model_id}:101"
         run(session, f"size {res101} stickRadius 0.35")
         run(session, f"color {res101} magenta")
-        run(session, f"transparency {res101} 30")
+        run(session, f"transparency {res101} 0")  # Fully opaque for individual paths
         
         # Add label for residue 101
         label_txt = residue_mapping.get("101", f"{get_resname(session,101)}101")
@@ -213,6 +223,25 @@ def visualize_single_path(session,
         
     except Exception as e:
         logging.error(f"Failed to style residue 101: {e}")
+
+    # ── 5b. Color the second residue in the pair yellow ────────────────
+    try:
+        # Extract the second residue number from the pair (e.g., "101 → 43" -> "43")
+        pair_parts = path_data['pair'].replace('→', '-').replace(' ', '').split('-')
+        if len(pair_parts) >= 2:
+            second_residue = pair_parts[1]
+            res_second = f"{model_id}:{second_residue}"
+            run(session, f"size {res_second} stickRadius 0.35")
+            run(session, f"color {res_second} yellow")
+            run(session, f"transparency {res_second} 0")  # Fully opaque for individual paths
+            
+            # Add label for the second residue
+            label_txt = residue_mapping.get(second_residue, f"{get_resname(session,int(second_residue))}{second_residue}")
+            run(session, f'label {model_id}:{second_residue}@CA text "{label_txt}" color yellow')
+            logging.info(f"Second residue {second_residue} styled in yellow")
+            
+    except Exception as e:
+        logging.error(f"Failed to style second residue: {e}")
 
     # ── 6. Show only Ca 918, hide all other calcium ions ──────────────
     try:
@@ -249,12 +278,25 @@ def visualize_single_path(session,
         logging.error(f"Failed final setup: {e}")
 
     # ── 8. save outputs ─────────────────────────────────────────────────
+    # Zoom in 1.25x
+    run(session, "view all")
+    run(session, "zoom 1.25")
+    
     # Create path-specific filename
     pair_name = path_data['pair'].replace(' ', '-').replace('→', '-').replace('→', '-')
     base = os.path.join(output_dir, f"path")
     try:
         logging.info(f"Saving single path to: {base}")
-        run(session, f'save "{base}.png" width 800 height 600')
+        
+        if use_raytracing:
+            # High quality POV-Ray render
+            run(session, f'save "{base}_povray.png" raytracing povray wait true supersample 3 width 1200 height 900')
+            logging.info("POV-Ray raytraced image saved")
+        else:
+            # High quality PNG with transparent background (screenshot method)
+            run(session, f'save "{base}.png" transparentBackground true supersample 3 width 1200 height 900')
+            logging.info("High quality screenshot saved")
+            
         run(session, f'save "{base}.cxs"')
         logging.info(f"Successfully saved single path: {base}")
     except Exception as e:
@@ -272,7 +314,8 @@ def visualize_paths(session,
                     category: str,
                     paths: list[dict],
                     output_dir: str,
-                    residue_mapping: dict):
+                    residue_mapping: dict,
+                    use_raytracing: bool = False):
     """
     Clean wireframe visualization with translucent colored network paths.
     White background, gray translucent backbone, thick colored paths.
@@ -306,9 +349,18 @@ def visualize_paths(session,
         return
 
     # ── 1. basic scene setup ────────────────────────────────────────────
-    run(session, "set bgColor white")
+    run(session, "set bgColor white")  # Keep white for POV-Ray rendering  
     run(session, "hide atoms")
     run(session, "hide cartoons")
+    
+    # Set POV-Ray preferences for high-quality rendering (only if using raytracing)
+    if use_raytracing:
+        try:
+            # Set POV-Ray executable path in preferences
+            session.user_settings.set('povray', 'povray_exe', '/opt/homebrew/bin/povray')
+            logging.info("POV-Ray path set in preferences")
+        except Exception as e:
+            logging.warning(f"Could not set POV-Ray path in preferences: {e}")
 
     # ── 2a. Set desired orientation ──────────────────────────────────
     run(session, "turn x 90")
@@ -344,8 +396,8 @@ def visualize_paths(session,
         
         # Make all sticks thin and gray
         run(session, f"size {model_id} stickRadius 0.06")  # Very thin
-        run(session, f"color {model_id} gray")
-        run(session, f"transparency {model_id} 85")  # Very transparent
+        run(session, f"color {model_id} lightgray")
+        run(session, f"transparency {model_id} 99")  # Much more transparent
         
         # No silhouettes for clean look
         run(session, "graphics silhouettes false")
@@ -430,10 +482,23 @@ def visualize_paths(session,
         logging.error(f"Failed final setup: {e}")
 
     # ── 8. save outputs ─────────────────────────────────────────────────
+    # Zoom in 1.25x
+    run(session, "view all")
+    run(session, "zoom 1.25")
+    
     base = os.path.join(output_dir, f"{category}_{system_name}")
     try:
         logging.info(f"Saving to: {base}")
-        run(session, f'save "{base}.png" width 800 height 600')
+        
+        if use_raytracing:
+            # High quality POV-Ray render
+            run(session, f'save "{base}_povray.png" raytracing povray wait true supersample 3 width 1200 height 900')
+            logging.info("POV-Ray raytraced image saved")
+        else:
+            # High quality PNG with transparent background (screenshot method)
+            run(session, f'save "{base}.png" transparentBackground true supersample 3 width 1200 height 900')
+            logging.info("High quality screenshot saved")
+            
         run(session, f'save "{base}.cxs"')
         logging.info(f"Successfully saved: {base}")
     except Exception as e:
@@ -447,9 +512,13 @@ def visualize_paths(session,
         logging.error(f"Failed to close model {model_id}: {e}")
 
 
-def main(session):
+def main(session, use_raytracing=True):
     """
     Main function to generate all visualizations in ChimeraX.
+    
+    Args:
+        session: ChimeraX session
+        use_raytracing (bool): Use POV-Ray raytracing instead of screenshots
     """
     log_dir = os.path.join(project_root, 'logs')
     os.makedirs(log_dir, exist_ok=True)
@@ -482,7 +551,7 @@ def main(session):
         grouped_paths[key].append({'residues': path['Optimal Path Residues'], 'pair': path['Residue Pair']})
 
     # Generate individual path visualizations
-    logging.info("Starting individual path visualizations...")
+    logging.info(f"Starting individual path visualizations (raytracing: {use_raytracing})...")
     for (system, category), paths in grouped_paths.items():
         # Create category-specific directory
         category_dir = os.path.join(base_output_dir, f"{category}_{system}")
@@ -497,14 +566,14 @@ def main(session):
             os.makedirs(path_dir, exist_ok=True)
             
             logging.info(f"Visualizing individual path: {system} - {category} - {path_data['pair']}")
-            visualize_single_path(session, system, category, path_data, path_dir, residue_mapping)
+            visualize_single_path(session, system, category, path_data, path_dir, residue_mapping, use_raytracing)
 
     # Generate combined visualizations (original functionality)
-    logging.info("Starting combined path visualizations...")
+    logging.info(f"Starting combined path visualizations (raytracing: {use_raytracing})...")
     for (system, category), paths in grouped_paths.items():
         logging.info(f"Visualizing {system} - {category.replace('_', ' ')}...")
         residue_mapping = wt_mapping if system == 'WT' else mutant_mapping
-        visualize_paths(session, system, category, paths, base_output_dir, residue_mapping)
+        visualize_paths(session, system, category, paths, base_output_dir, residue_mapping, use_raytracing)
 
     # Generate combined visualizations for high contact categories
     for system in ['WT', 'Mutant']:
@@ -517,6 +586,6 @@ def main(session):
         
         if combined_paths:
             residue_mapping = wt_mapping if system == 'WT' else mutant_mapping
-            visualize_paths(session, system, 'combined_high_contact', combined_paths, base_output_dir, residue_mapping)
+            visualize_paths(session, system, 'combined_high_contact', combined_paths, base_output_dir, residue_mapping, use_raytracing)
 
 main(session)
