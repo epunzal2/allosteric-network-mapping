@@ -142,6 +142,12 @@ def visualize_paths(session,
     run(session, "set bgColor white")
     run(session, "hide atoms")
     run(session, "hide cartoons")
+
+    # ── 2a. Set desired orientation ──────────────────────────────────
+    run(session, "turn x 90")
+    run(session, "turn z 90")
+    run(session, "turn x 90")
+    run(session, "turn z -10")
     
     # ── 2. Show protein structure properly ─────────────────────────────
     # This is a full atomic structure, not just CA atoms

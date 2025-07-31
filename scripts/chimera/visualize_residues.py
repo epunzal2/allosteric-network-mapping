@@ -22,6 +22,12 @@ def visualize_residues(session,
     run(session, "hide atoms")            # Hide all atom representations
     run(session, "hide cartoons")         # Remove ribbons completely
     
+    # ── Set desired orientation ──────────────────────────────────
+    run(session, "turn x 90")
+    run(session, "turn z 90")
+    run(session, "turn x 90")
+    run(session, "turn z -10")
+    
     # ── Show all bonds in stick representation ─────────────────────────
     run(session, f"show {all_residues} bonds")
     run(session, f"style {all_residues} stick")
@@ -40,3 +46,4 @@ def visualize_residues(session,
     run(session, "lighting soft")
     
     print("=== VISUALIZE_RESIDUES FUNCTION COMPLETE ===")  # Debug
+    
