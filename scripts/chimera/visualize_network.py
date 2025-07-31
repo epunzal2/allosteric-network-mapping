@@ -100,6 +100,173 @@ def get_resname(session, resid, chain_id=None):
 
     return res.names[mask][0] if mask.any() else ""
 
+def visualize_single_path(session,
+                         system_name: str,
+                         category: str,
+                         path_data: dict,
+                         output_dir: str,
+                         residue_mapping: dict):
+    """
+    Visualize a single network path with clean wireframe background.
+    """
+    
+    print(f"=== VISUALIZE_SINGLE_PATH: {system_name} - {category} - {path_data['pair']} ===")
+
+    # ── 0. open structure ───────────────────────────────────────────────
+    pdb_file = (
+        os.path.join(project_root, "Data/AF2_LM211_WT/calcium/frame1_CA.pdb")
+        if system_name == "WT" else
+        os.path.join(project_root,
+                     "Data/AF2_LM2_Y138H_11_Mutant/calcium/frame1_CA.pdb")
+    )
+    logging.info(f"Opening PDB file: {pdb_file}")
+    try:
+        run(session, f'open "{pdb_file}"')
+        logging.info("PDB file opened successfully")
+        
+        # Get the current model number (the one just opened)
+        models = session.models.list()
+        current_model = models[-1]  # Last opened model
+        model_id = f"#{current_model.id_string}"
+        logging.info(f"Working with model: {model_id}")
+        
+    except Exception as e:
+        logging.error(f"Failed to open PDB file: {e}")
+        return
+
+    # ── 1. basic scene setup ────────────────────────────────────────────
+    run(session, "set bgColor white")
+    run(session, "hide atoms")
+    run(session, "hide cartoons")
+
+    # ── 2a. Set desired orientation ──────────────────────────────────
+    run(session, "turn x 90")
+    run(session, "turn z 90")
+    run(session, "turn x 90")
+    run(session, "turn z -10")
+    
+    # ── 2. Show protein structure properly ─────────────────────────────
+    logging.info("Setting up protein visualization...")
+    
+    try:
+        # Show all atoms and bonds
+        run(session, f"show {model_id}")
+        run(session, f"show {model_id} atoms")
+        run(session, f"show {model_id} bonds")
+        run(session, f"style {model_id} stick")
+        
+        logging.info("Protein structure setup complete")
+        
+    except Exception as e:
+        logging.error(f"Failed to setup protein structure: {e}")
+        return
+    
+    # ── 3. Gray translucent wireframe backbone ─────────────────────────
+    logging.info("Setting up wireframe backbone...")
+    try:
+        # Hide all atoms, show only bonds as thin gray sticks
+        run(session, f"hide {model_id} atoms")
+        run(session, f"hide {model_id} cartoons")
+        run(session, f"show {model_id} bonds")
+        run(session, f"style {model_id} stick")
+        
+        # Make all sticks thin and gray
+        run(session, f"size {model_id} stickRadius 0.06")  # Very thin
+        run(session, f"color {model_id} gray")
+        run(session, f"transparency {model_id} 85")  # Very transparent
+        
+        # No silhouettes for clean look
+        run(session, "graphics silhouettes false")
+        logging.info("Wireframe backbone setup complete")
+        
+    except Exception as e:
+        logging.error(f"Failed to setup backbone: {e}")
+        return
+    
+    # ── 4. Highlight single path with thick colored sticks ────────────
+    try:
+        seg = list(dict.fromkeys(path_data["residues"]))
+        sel = f"{model_id}:{','.join(map(str, seg))}"
+        
+        logging.info(f"Styling single path: residues {seg} with color royalblue")
+        
+        # Make path sticks thicker, colored, and translucent
+        run(session, f"size {sel} stickRadius 0.35")  # Much thicker
+        run(session, f"color {sel} royalblue")
+        run(session, f"transparency {sel} 30")  # Translucent
+        
+    except Exception as e:
+        logging.error(f"Failed to style path: {e}")
+        return
+
+    # ── 5. Residue 101 as thick magenta stick ──────────────────────────
+    try:
+        res101 = f"{model_id}:101"
+        run(session, f"size {res101} stickRadius 0.35")
+        run(session, f"color {res101} magenta")
+        run(session, f"transparency {res101} 30")
+        
+        # Add label for residue 101
+        label_txt = residue_mapping.get("101", f"{get_resname(session,101)}101")
+        run(session, f'label {model_id}:101@CA text "{label_txt}" color magenta')
+        logging.info("Residue 101 styled successfully")
+        
+    except Exception as e:
+        logging.error(f"Failed to style residue 101: {e}")
+
+    # ── 6. Show only Ca 918, hide all other calcium ions ──────────────
+    try:
+        # Hide all calcium ions first
+        run(session, f"hide {model_id} & :CA atoms")
+        
+        # Show only Ca 918 as a sphere
+        ca918 = f"{model_id}:918"
+        run(session, f"show {ca918} atoms")
+        run(session, f"style {ca918} sphere")
+        run(session, f"size {ca918} atomRadius 1.5")
+        run(session, f"color {ca918} darkgreen")
+        
+        # Make sure no bonds are shown for calcium ions
+        run(session, f"hide {model_id} & :CA bonds")
+        logging.info("Calcium ions handled successfully")
+        
+    except Exception as e:
+        logging.error(f"Failed to handle calcium ions: {e}")
+
+    # ── 7. Final cleanup and lighting ──────────────────────────────────
+    try:
+        # Ensure only protein bonds are visible as sticks
+        run(session, f"hide {model_id} atoms")
+        run(session, f"show {ca918} atoms")
+        run(session, f"show {model_id} bonds")
+        run(session, f"hide {model_id} & :CA bonds")
+        
+        # Clean lighting for clear visualization
+        run(session, "lighting soft")
+        logging.info("Final visualization setup complete")
+        
+    except Exception as e:
+        logging.error(f"Failed final setup: {e}")
+
+    # ── 8. save outputs ─────────────────────────────────────────────────
+    # Create path-specific filename
+    pair_name = path_data['pair'].replace(' ', '-').replace('→', '-').replace('→', '-')
+    base = os.path.join(output_dir, f"path")
+    try:
+        logging.info(f"Saving single path to: {base}")
+        run(session, f'save "{base}.png" width 800 height 600')
+        run(session, f'save "{base}.cxs"')
+        logging.info(f"Successfully saved single path: {base}")
+    except Exception as e:
+        logging.error(f"Save failed for single path {base}: {e}")
+
+    # ── 9. clean up ─────────────────────────────────────────────────────
+    try:
+        run(session, f"close {model_id}")
+        logging.info(f"Closed model {model_id}")
+    except Exception as e:
+        logging.error(f"Failed to close model {model_id}: {e}")
+
 def visualize_paths(session,
                     system_name: str,
                     category: str,
@@ -296,8 +463,8 @@ def main(session):
     markdown_file = os.path.join(project_root, 'analysis_results/reports/optimal_paths_details.md')
     
     # Define and create the output directory
-    output_dir = os.path.join(project_root, 'analysis_results/chimera_visualizations_schematics/')
-    os.makedirs(output_dir, exist_ok=True)
+    base_output_dir = os.path.join(project_root, 'analysis_results/chimera_visualizations_schematics/')
+    os.makedirs(base_output_dir, exist_ok=True)
 
     all_paths = parse_optimal_paths(markdown_file)
 
@@ -314,11 +481,30 @@ def main(session):
             grouped_paths[key] = []
         grouped_paths[key].append({'residues': path['Optimal Path Residues'], 'pair': path['Residue Pair']})
 
-    # Generate individual visualizations
+    # Generate individual path visualizations
+    logging.info("Starting individual path visualizations...")
+    for (system, category), paths in grouped_paths.items():
+        # Create category-specific directory
+        category_dir = os.path.join(base_output_dir, f"{category}_{system}")
+        os.makedirs(category_dir, exist_ok=True)
+        
+        residue_mapping = wt_mapping if system == 'WT' else mutant_mapping
+        
+        for path_data in paths:
+            # Create path-specific subdirectory
+            pair_name = path_data['pair'].replace(' ', '-').replace('→', '-').replace('→', '-')
+            path_dir = os.path.join(category_dir, pair_name)
+            os.makedirs(path_dir, exist_ok=True)
+            
+            logging.info(f"Visualizing individual path: {system} - {category} - {path_data['pair']}")
+            visualize_single_path(session, system, category, path_data, path_dir, residue_mapping)
+
+    # Generate combined visualizations (original functionality)
+    logging.info("Starting combined path visualizations...")
     for (system, category), paths in grouped_paths.items():
         logging.info(f"Visualizing {system} - {category.replace('_', ' ')}...")
         residue_mapping = wt_mapping if system == 'WT' else mutant_mapping
-        visualize_paths(session, system, category, paths, output_dir, residue_mapping)
+        visualize_paths(session, system, category, paths, base_output_dir, residue_mapping)
 
     # Generate combined visualizations for high contact categories
     for system in ['WT', 'Mutant']:
@@ -331,6 +517,6 @@ def main(session):
         
         if combined_paths:
             residue_mapping = wt_mapping if system == 'WT' else mutant_mapping
-            visualize_paths(session, system, 'combined_high_contact', combined_paths, output_dir, residue_mapping)
+            visualize_paths(session, system, 'combined_high_contact', combined_paths, base_output_dir, residue_mapping)
 
 main(session)
