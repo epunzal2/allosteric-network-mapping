@@ -14,7 +14,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 if script_dir not in sys.path:
     sys.path.append(script_dir)
 
-from visualize_residues import visualize_residues
+from visualize_residues_schematic import visualize_residues
 
 def parse_optimal_paths(markdown_file):
     """
@@ -90,35 +90,147 @@ def load_residue_mapping(mapping_file):
             mapping[row['resid']] = row['full_orig_label']
     return mapping
 
-def get_resname(session, resid, chain_id=None):
-    model = session.models.list()[0]        # first atomic model (#1)
-    res   = model.residues                  # a Residues array
+def get_resname(atomic_model, resid, chain_id=None):
+    """
+    Gets the residue name from a specific atomic model.
+    """
+    if not hasattr(atomic_model, 'residues'):
+        return ""  # Return empty if it's not an atomic model
 
+    res = atomic_model.residues
     mask = (res.numbers == resid)
     if chain_id is not None:
         mask &= (res.chain_ids == chain_id)
 
     return res.names[mask][0] if mask.any() else ""
 
+# Global flag to track which method works for this ChimeraX version
+_tube_method = None
+
+def setup_wireframe_backbone(session, model_id):
+    """
+    Set up wireframe backbone with optimized method detection
+    """
+    global _tube_method
+    
+    logging.info("Setting up wireframe backbone...")
+    try:
+        # Hide ALL atoms initially - we'll only show specific ones later
+        run(session, f"hide {model_id} atoms")
+        
+        # Use previously successful method if known
+        if _tube_method == "no_name":
+            cmd = f"shape tube {model_id}@CA radius 0.05 color lightgray"
+            run(session, cmd)
+            run(session, "transparency 85 surfaces")
+            logging.info("Using optimized method (no name parameter)")
+        elif _tube_method == "cartoon":
+            run(session, f"show {model_id} cartoons")
+            run(session, f"cartoon style {model_id} width 0.03 thickness 0.01")
+            run(session, f"color {model_id} lightgray")
+            run(session, f"transparency {model_id} 85")
+            logging.info("Using optimized method (cartoon style)")
+        else:
+            # First time - try methods and remember which works
+            try:
+                # Method 1: Try with name parameter
+                cmd = f"shape tube {model_id}@CA radius 0.05 color lightgray name backbone_tube"
+                run(session, cmd)
+                run(session, "transparency 85 surfaces name backbone_tube")
+                _tube_method = "with_name"
+                logging.info("Method 1 (with name) succeeded - will use this method going forward")
+            except Exception:
+                try:
+                    # Method 2: Try without name parameter
+                    cmd = f"shape tube {model_id}@CA radius 0.05 color lightgray"
+                    run(session, cmd)
+                    run(session, "transparency 85 surfaces")
+                    _tube_method = "no_name"
+                    logging.info("Method 2 (no name) succeeded - will use this method going forward")
+                except Exception:
+                    # Method 3: Use cartoon style
+                    run(session, f"show {model_id} cartoons")
+                    run(session, f"cartoon style {model_id} width 0.03 thickness 0.01")
+                    run(session, f"color {model_id} lightgray")
+                    run(session, f"transparency {model_id} 85")
+                    _tube_method = "cartoon"
+                    logging.info("Method 3 (cartoon) succeeded - will use this method going forward")
+        
+        # No silhouettes for clean look
+        run(session, "graphics silhouettes false")
+        logging.info("Wireframe backbone setup complete")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Failed to setup backbone: {e}")
+        return False
+
+def setup_path_tube(session, model_id, residues, color, tube_name, radius=0.45, transparency=40):
+    """
+    Create a tube for specific residues with optimized method detection
+    """
+    global _tube_method
+    
+    try:
+        if not residues:
+            return False
+            
+        sel = f"{model_id}:{','.join(map(str, residues))}"
+        
+        # Use the method we know works for this ChimeraX version
+        if _tube_method == "no_name":
+            cmd = f"shape tube {sel}@CA radius {radius} color {color}"
+            run(session, cmd)
+            if transparency > 0:
+                run(session, f"transparency {transparency} surfaces")
+        elif _tube_method == "with_name":
+            cmd = f"shape tube {sel}@CA radius {radius} color {color} name {tube_name}"
+            run(session, cmd)
+            run(session, f"transparency {transparency} surfaces name {tube_name}")
+        elif _tube_method == "cartoon":
+            # For cartoon method, style the specific residues
+            run(session, f"cartoon style {sel} width {radius*0.4} thickness {radius*0.2}")
+            run(session, f"color {sel} {color}")
+            if transparency > 0:
+                run(session, f"transparency {sel} {transparency}")
+        else:
+            # Fallback - try the methods in order
+            try:
+                cmd = f"shape tube {sel}@CA radius {radius} color {color}"
+                run(session, cmd)
+                if transparency > 0:
+                    run(session, f"transparency {transparency} surfaces")
+            except Exception:
+                # Final fallback to sphere style
+                run(session, f"show {sel}@CA")
+                run(session, f"style {sel}@CA sphere")
+                run(session, f"size {sel}@CA atomRadius {radius}")
+                run(session, f"color {sel}@CA {color}")
+                if transparency > 0:
+                    run(session, f"transparency {sel}@CA {transparency}")
+        
+        return True
+    except Exception as e:
+        logging.error(f"Failed to create tube {tube_name}: {e}")
+        return False
+
 def visualize_single_path(session,
                          system_name: str,
                          category: str,
                          path_data: dict,
                          output_dir: str,
-                         residue_mapping: dict,
-                         use_raytracing: bool = False):
+                         residue_mapping: dict):
     """
     Visualize a single network path with clean wireframe background.
     """
     
     print(f"=== VISUALIZE_SINGLE_PATH: {system_name} - {category} - {path_data['pair']} ===")
 
-    # ── 0. open structure ───────────────────────────────────────────────
+    # Open structure
     pdb_file = (
         os.path.join(project_root, "Data/AF2_LM211_WT/calcium/frame1_CA.pdb")
         if system_name == "WT" else
-        os.path.join(project_root,
-                     "Data/AF2_LM2_Y138H_11_Mutant/calcium/frame1_CA.pdb")
+        os.path.join(project_root, "Data/AF2_LM2_Y138H_11_Mutant/calcium/frame1_CA.pdb")
     )
     logging.info(f"Opening PDB file: {pdb_file}")
     try:
@@ -135,150 +247,103 @@ def visualize_single_path(session,
         logging.error(f"Failed to open PDB file: {e}")
         return
 
-    # ── 1. basic scene setup ────────────────────────────────────────────
-    run(session, "set bgColor white")  # Keep white for POV-Ray rendering
+    # Basic scene setup - transparent background for raytracing
+    run(session, "set bgColor transparent")
     run(session, "hide atoms")
     run(session, "hide cartoons")
     
-    # Set POV-Ray preferences for high-quality rendering (only if using raytracing)
-    if use_raytracing:
-        try:
-            # Set POV-Ray executable path in preferences
-            session.user_settings.set('povray', 'povray_exe', '/opt/homebrew/bin/povray')
-            logging.info("POV-Ray path set in preferences")
-        except Exception as e:
-            logging.warning(f"Could not set POV-Ray path in preferences: {e}")
-
-    # ── 2a. Set desired orientation ──────────────────────────────────
+    # Set desired orientation
     run(session, "turn x 90")
     run(session, "turn z 90")
     run(session, "turn x 90")
     run(session, "turn z -10")
     
-    # ── 2. Show protein structure properly ─────────────────────────────
+    # Show protein structure properly
     logging.info("Setting up protein visualization...")
-    
     try:
         # Show all atoms and bonds
         run(session, f"show {model_id}")
         run(session, f"show {model_id} atoms")
         run(session, f"show {model_id} bonds")
-        run(session, f"style {model_id} stick")
-        
         logging.info("Protein structure setup complete")
-        
     except Exception as e:
         logging.error(f"Failed to setup protein structure: {e}")
         return
     
-    # ── 3. Gray translucent wireframe backbone ─────────────────────────
-    logging.info("Setting up wireframe backbone...")
-    try:
-        # Hide all atoms, show only bonds as thin gray sticks
-        run(session, f"hide {model_id} atoms")
-        run(session, f"hide {model_id} cartoons")
-        run(session, f"show {model_id} bonds")
-        run(session, f"style {model_id} stick")
-        
-        # Make all sticks thin and light gray (closer to white)
-        run(session, f"size {model_id} stickRadius 0.06")  # Very thin
-        run(session, f"color {model_id} lightgray")
-        run(session, f"transparency {model_id} 95")  # Much more transparent
-        
-        # No silhouettes for clean look
-        run(session, "graphics silhouettes false")
-        logging.info("Wireframe backbone setup complete")
-        
-    except Exception as e:
-        logging.error(f"Failed to setup backbone: {e}")
+    # Set up wireframe backbone
+    if not setup_wireframe_backbone(session, model_id):
         return
     
-    # ── 4. Highlight single path with thick colored sticks ────────────
+    # Highlight single path with thick colored tube (translucent)
     try:
         seg = list(dict.fromkeys(path_data["residues"]))
-        sel = f"{model_id}:{','.join(map(str, seg))}"
-        
         logging.info(f"Styling single path: residues {seg} with color royalblue")
-        
-        # Make path sticks thicker, colored, and fully opaque for individual paths
-        run(session, f"size {sel} stickRadius 0.35")  # Much thicker
-        run(session, f"color {sel} royalblue")
-        run(session, f"transparency {sel} 0")  # Fully opaque for individual paths
-        
+        setup_path_tube(session, model_id, seg, "royalblue", "path_tube", 0.45, 40)
     except Exception as e:
         logging.error(f"Failed to style path: {e}")
         return
 
-    # ── 5. Residue 101 as thick magenta stick ──────────────────────────
+    # Residue 101 as thick magenta tube (more prominent, less transparent)
     try:
-        res101 = f"{model_id}:101"
-        run(session, f"size {res101} stickRadius 0.35")
-        run(session, f"color {res101} magenta")
-        run(session, f"transparency {res101} 0")  # Fully opaque for individual paths
+        setup_path_tube(session, model_id, [101], "magenta", "res101_tube", 0.6, 15)
         
         # Add label for residue 101
-        label_txt = residue_mapping.get("101", f"{get_resname(session,101)}101")
-        run(session, f'label {model_id}:101@CA text "{label_txt}" color magenta')
+        label_txt = residue_mapping.get("101", f"{get_resname(current_model, 101)}101")
+        run(session, f'label {model_id}:101@CA text "{label_txt}" color magenta size 14')
         logging.info("Residue 101 styled successfully")
-        
     except Exception as e:
         logging.error(f"Failed to style residue 101: {e}")
 
-    # ── 5b. Color the second residue in the pair yellow ────────────────
+    # Color the second residue in the pair yellow (translucent)
     try:
-        # Extract the second residue number from the pair (e.g., "101 → 43" -> "43")
+        # Extract the second residue number from the pair
         pair_parts = path_data['pair'].replace('→', '-').replace(' ', '').split('-')
         if len(pair_parts) >= 2:
-            second_residue = pair_parts[1]
-            res_second = f"{model_id}:{second_residue}"
-            run(session, f"size {res_second} stickRadius 0.35")
-            run(session, f"color {res_second} yellow")
-            run(session, f"transparency {res_second} 0")  # Fully opaque for individual paths
+            second_residue = int(pair_parts[1])
+            setup_path_tube(session, model_id, [second_residue], "yellow", "second_res_tube", 0.45, 30)
             
             # Add label for the second residue
-            label_txt = residue_mapping.get(second_residue, f"{get_resname(session,int(second_residue))}{second_residue}")
-            run(session, f'label {model_id}:{second_residue}@CA text "{label_txt}" color yellow')
+            label_txt = residue_mapping.get(str(second_residue), f"{get_resname(current_model, second_residue)}{second_residue}")
+            run(session, f'label {model_id}:{second_residue}@CA text "{label_txt}" color yellow size 12')
             logging.info(f"Second residue {second_residue} styled in yellow")
-            
     except Exception as e:
         logging.error(f"Failed to style second residue: {e}")
 
-    # ── 6. Show only Ca 918, hide all other calcium ions ──────────────
+    # Show ONLY Ca 918, hide all other calcium and protein atoms
     try:
-        # Hide all calcium ions first
-        run(session, f"hide {model_id} & :CA atoms")
+        # Hide ALL atoms first
+        run(session, f"hide {model_id} atoms")
         
-        # Show only Ca 918 as a sphere
+        # Show only Ca 918 as a prominent sphere
         ca918 = f"{model_id}:918"
         run(session, f"show {ca918} atoms")
         run(session, f"style {ca918} sphere")
-        run(session, f"size {ca918} atomRadius 1.5")
+        run(session, f"size {ca918} atomRadius 1.8")
         run(session, f"color {ca918} darkgreen")
         
-        # Make sure no bonds are shown for calcium ions
-        run(session, f"hide {model_id} & :CA bonds")
-        logging.info("Calcium ions handled successfully")
+        # Add label for Ca 918
+        run(session, f'label {ca918} text "Ca²⁺ 918" color darkgreen size 12')
+        
+        # Make sure no other atoms or bonds are shown
+        run(session, f"hide {model_id} bonds")
+        logging.info("Only Ca 918 visible, all other atoms hidden")
         
     except Exception as e:
         logging.error(f"Failed to handle calcium ions: {e}")
 
-    # ── 7. Final cleanup and lighting ──────────────────────────────────
+    # Final cleanup and lighting
     try:
-        # Ensure only protein bonds are visible as sticks
+        # Ensure ONLY Ca 918 atoms are visible, everything else hidden
         run(session, f"hide {model_id} atoms")
         run(session, f"show {ca918} atoms")
-        run(session, f"show {model_id} bonds")
-        run(session, f"hide {model_id} & :CA bonds")
         
         # Clean lighting for clear visualization
         run(session, "lighting soft")
         logging.info("Final visualization setup complete")
-        
     except Exception as e:
         logging.error(f"Failed final setup: {e}")
 
-    # ── 8. save outputs ─────────────────────────────────────────────────
-    # Zoom in 1.25x
+    # Save outputs
     run(session, "view all")
     run(session, "zoom 1.25")
     
@@ -287,22 +352,14 @@ def visualize_single_path(session,
     base = os.path.join(output_dir, f"path")
     try:
         logging.info(f"Saving single path to: {base}")
-        
-        if use_raytracing:
-            # High quality POV-Ray render with high DPI
-            run(session, f'save "{base}_povray.png" raytracing povray wait true supersample 3 width 1200 height 900 dpi 500')
-            logging.info("POV-Ray raytraced image saved")
-        else:
-            # High quality PNG with transparent background (screenshot method)
-            run(session, f'save "{base}.png" transparentBackground true supersample 3 width 1200 height 900')
-            logging.info("High quality screenshot saved")
-            
+        run(session, f'save "{base}.png" supersample 3 width 1200 height 900')
+        logging.info("High quality screenshot saved")
         run(session, f'save "{base}.cxs"')
         logging.info(f"Successfully saved single path: {base}")
     except Exception as e:
         logging.error(f"Save failed for single path {base}: {e}")
 
-    # ── 9. clean up ─────────────────────────────────────────────────────
+    # Clean up
     try:
         run(session, f"close {model_id}")
         logging.info(f"Closed model {model_id}")
@@ -314,100 +371,61 @@ def visualize_paths(session,
                     category: str,
                     paths: list[dict],
                     output_dir: str,
-                    residue_mapping: dict,
-                    use_raytracing: bool = False):
+                    residue_mapping: dict):
     """
     Clean wireframe visualization with translucent colored network paths.
     White background, gray translucent backbone, thick colored paths.
     """
     
-    print(f"=== VISUALIZE_PATHS CALLED: {system_name} - {category} ===")  # Debug
+    print(f"=== VISUALIZE_PATHS CALLED: {system_name} - {category} ===")
 
-    # ── 0. open structure ───────────────────────────────────────────────
+    # Open structure
     pdb_file = (
         os.path.join(project_root, "Data/AF2_LM211_WT/calcium/frame1_CA.pdb")
         if system_name == "WT" else
-        os.path.join(project_root,
-                     "Data/AF2_LM2_Y138H_11_Mutant/calcium/frame1_CA.pdb")
+        os.path.join(project_root, "Data/AF2_LM2_Y138H_11_Mutant/calcium/frame1_CA.pdb")
     )
     logging.info(f"Opening PDB file: {pdb_file}")
     try:
         run(session, f'open "{pdb_file}"')
         logging.info("PDB file opened successfully")
         
-        # Get the current model number (the one just opened)
+        # Get the current model number
         models = session.models.list()
-        current_model = models[-1]  # Last opened model
+        current_model = models[-1]
         model_id = f"#{current_model.id_string}"
         logging.info(f"Working with model: {model_id}")
-        
-        # Debug: Check what was loaded
-        run(session, "info models")
-        
     except Exception as e:
         logging.error(f"Failed to open PDB file: {e}")
         return
 
-    # ── 1. basic scene setup ────────────────────────────────────────────
-    run(session, "set bgColor white")  # Keep white for POV-Ray rendering  
+    # Basic scene setup - transparent background for raytracing
+    run(session, "set bgColor transparent")
     run(session, "hide atoms")
     run(session, "hide cartoons")
     
-    # Set POV-Ray preferences for high-quality rendering (only if using raytracing)
-    if use_raytracing:
-        try:
-            # Set POV-Ray executable path in preferences
-            session.user_settings.set('povray', 'povray_exe', '/opt/homebrew/bin/povray')
-            logging.info("POV-Ray path set in preferences")
-        except Exception as e:
-            logging.warning(f"Could not set POV-Ray path in preferences: {e}")
-
-    # ── 2a. Set desired orientation ──────────────────────────────────
+    # Set desired orientation
     run(session, "turn x 90")
     run(session, "turn z 90")
     run(session, "turn x 90")
     run(session, "turn z -10")
     
-    # ── 2. Show protein structure properly ─────────────────────────────
-    # This is a full atomic structure, not just CA atoms
+    # Show protein structure properly
     logging.info("Setting up protein visualization...")
-    
     try:
-        # Show all atoms and bonds
         run(session, f"show {model_id}")
         run(session, f"show {model_id} atoms")
         run(session, f"show {model_id} bonds")
-        run(session, f"style {model_id} stick")
-        
         logging.info("Protein structure setup complete")
-        
     except Exception as e:
         logging.error(f"Failed to setup protein structure: {e}")
         return
     
-    # ── 3. Gray translucent wireframe backbone ─────────────────────────
-    logging.info("Setting up wireframe backbone...")
-    try:
-        # Hide all atoms, show only bonds as thin gray sticks
-        run(session, f"hide {model_id} atoms")
-        run(session, f"hide {model_id} cartoons")  # Make sure no ribbons
-        run(session, f"show {model_id} bonds")
-        run(session, f"style {model_id} stick")
-        
-        # Make all sticks thin and gray
-        run(session, f"size {model_id} stickRadius 0.06")  # Very thin
-        run(session, f"color {model_id} gray")
-        run(session, f"transparency {model_id} 95")  # Much more transparent
-        
-        # No silhouettes for clean look
-        run(session, "graphics silhouettes false")
-        logging.info("Wireframe backbone setup complete")
-        
-    except Exception as e:
-        logging.error(f"Failed to setup backbone: {e}")
+    # Set up wireframe backbone
+    if not setup_wireframe_backbone(session, model_id):
         return
     
-    # ── 4. Thicker translucent colored sticks for network paths ────────
+    # Thicker translucent colored tubes for network paths
     palette = [
         "royalblue","crimson","forestgreen","darkorange","purple","teal",
         "maroon","darkslateblue","darkgoldenrod","indigo","darkred","brown",
@@ -418,112 +436,92 @@ def visualize_paths(session,
     for i, p in enumerate(paths):
         try:
             seg = list(dict.fromkeys(p["residues"]))
-            sel = f"{model_id}:{','.join(map(str, seg))}"
             clr = palette[i % len(palette)]
             
             logging.info(f"Styling path {i+1}: residues {seg} with color {clr}")
-            
-            # Make path sticks thicker, colored, and translucent
-            run(session, f"size {sel} stickRadius 0.35")  # Much thicker
-            run(session, f"color {sel} {clr}")
-            run(session, f"transparency {sel} 30")  # Translucent so colors don't block
-            
+            setup_path_tube(session, model_id, seg, clr, f"path_tube_{i}", 0.45, 50)
         except Exception as e:
             logging.error(f"Failed to style path {i+1}: {e}")
             continue
 
-    # ── 5. Residue 101 as thick magenta stick ──────────────────────────
+    # Residue 101 as thick magenta tube (more prominent) - AFTER paths so it overlays
     try:
-        res101 = f"{model_id}:101"
-        run(session, f"size {res101} stickRadius 0.35")  # Same thickness as paths
-        run(session, f"color {res101} magenta")
-        run(session, f"transparency {res101} 30")  # Translucent
+        setup_path_tube(session, model_id, [101], "magenta", "res101_tube", 0.6, 0)
         
         # Add label for residue 101
-        label_txt = residue_mapping.get("101", f"{get_resname(session,101)}101")
-        run(session, f'label {model_id}:101@CA text "{label_txt}" color magenta')
-        logging.info("Residue 101 styled successfully")
-        
+        label_txt = residue_mapping.get("101", f"{get_resname(current_model, 101)}101")
+        run(session, f'label {model_id}:101@CA text "{label_txt}" color magenta size 14')
+        logging.info("Residue 101 styled successfully (overlaying paths)")
     except Exception as e:
         logging.error(f"Failed to style residue 101: {e}")
 
-    # ── 6. Show only Ca 918, hide all other calcium ions ──────────────
+    # Show ONLY Ca 918, hide all other atoms
     try:
-        # Hide all calcium ions first
-        run(session, f"hide {model_id} & :CA atoms")  # Hide all calcium atoms
+        # Hide ALL atoms first
+        run(session, f"hide {model_id} atoms")
         
-        # Show only Ca 918 as a sphere
+        # Show only Ca 918 as a prominent sphere
         ca918 = f"{model_id}:918"
         run(session, f"show {ca918} atoms")
         run(session, f"style {ca918} sphere")
-        run(session, f"size {ca918} atomRadius 1.5")
+        run(session, f"size {ca918} atomRadius 1.8")
         run(session, f"color {ca918} darkgreen")
         
-        # Make sure no bonds are shown for calcium ions
-        run(session, f"hide {model_id} & :CA bonds")
-        logging.info("Calcium ions handled successfully")
+        # Add label for Ca 918
+        run(session, f'label {ca918} text "Ca²⁺ 918" color darkgreen size 12')
+        
+        # Make sure no other atoms or bonds are shown
+        run(session, f"hide {model_id} bonds")
+        logging.info("Only Ca 918 visible, all other atoms hidden")
         
     except Exception as e:
         logging.error(f"Failed to handle calcium ions: {e}")
 
-    # ── 7. Final cleanup and lighting ──────────────────────────────────
+    # Final cleanup and lighting
     try:
-        # Ensure only protein bonds are visible as sticks
-        run(session, f"hide {model_id} atoms")  # Hide all atoms
-        run(session, f"show {ca918} atoms")  # Show only Ca 918
-        run(session, f"show {model_id} bonds")  # Show protein bonds
-        run(session, f"hide {model_id} & :CA bonds")  # Hide calcium ion bonds
+        # Ensure ONLY Ca 918 atoms are visible, everything else hidden
+        run(session, f"hide {model_id} atoms")
+        run(session, f"show {ca918} atoms")
         
         # Clean lighting for clear visualization
         run(session, "lighting soft")
         logging.info("Final visualization setup complete")
-        
     except Exception as e:
         logging.error(f"Failed final setup: {e}")
 
-    # ── 8. save outputs ─────────────────────────────────────────────────
-    # Zoom in 1.25x
+    # Save outputs
     run(session, "view all")
     run(session, "zoom 1.25")
     
     base = os.path.join(output_dir, f"{category}_{system_name}")
     try:
         logging.info(f"Saving to: {base}")
-        
-        if use_raytracing:
-            # High quality POV-Ray render with high DPI
-            run(session, f'save "{base}_povray.png" raytracing povray wait true supersample 3 width 1200 height 900 dpi 500')
-            logging.info("POV-Ray raytraced image saved")
-        else:
-            # High quality PNG with transparent background (screenshot method)
-            run(session, f'save "{base}.png" transparentBackground true supersample 3 width 1200 height 900')
-            logging.info("High quality screenshot saved")
-            
+        run(session, f'save "{base}.png" supersample 3 width 1200 height 900')
+        logging.info("High quality screenshot saved")
         run(session, f'save "{base}.cxs"')
         logging.info(f"Successfully saved: {base}")
     except Exception as e:
         logging.error(f"Save failed for {base}: {e}")
 
-    # ── 9. clean up ─────────────────────────────────────────────────────
+    # Clean up
     try:
-        run(session, f"close {model_id}")  # Close only this model, not all
+        run(session, f"close {model_id}")
         logging.info(f"Closed model {model_id}")
     except Exception as e:
         logging.error(f"Failed to close model {model_id}: {e}")
 
 
-def main(session, use_raytracing=True):
+def main(session):
     """
     Main function to generate all visualizations in ChimeraX.
     
     Args:
         session: ChimeraX session
-        use_raytracing (bool): Use POV-Ray raytracing instead of screenshots
     """
     log_dir = os.path.join(project_root, 'logs')
     os.makedirs(log_dir, exist_ok=True)
     
-    log_file_name = f"chimerax_visualization_{datetime.now().strftime('%Y-%m-%d')}.log"
+    log_file_name = f"chimerax_visualization_schematic_{datetime.now().strftime('%Y-%m-%d')}.log"
     logging.basicConfig(filename=os.path.join(log_dir, log_file_name),
                         level=logging.INFO,
                         format='%(asctime)s - %(levelname)s - %(message)s',
@@ -532,7 +530,7 @@ def main(session, use_raytracing=True):
     markdown_file = os.path.join(project_root, 'analysis_results/reports/optimal_paths_details.md')
     
     # Define and create the output directory
-    base_output_dir = os.path.join(project_root, 'analysis_results/chimera_visualizations_schematics/')
+    base_output_dir = os.path.join(project_root, 'analysis_results/chimera_visualizations_schematics/schematics')
     os.makedirs(base_output_dir, exist_ok=True)
 
     all_paths = parse_optimal_paths(markdown_file)
@@ -551,7 +549,7 @@ def main(session, use_raytracing=True):
         grouped_paths[key].append({'residues': path['Optimal Path Residues'], 'pair': path['Residue Pair']})
 
     # Generate individual path visualizations
-    logging.info(f"Starting individual path visualizations (raytracing: {use_raytracing})...")
+    logging.info("Starting individual path visualizations...")
     for (system, category), paths in grouped_paths.items():
         # Create category-specific directory
         category_dir = os.path.join(base_output_dir, f"{category}_{system}")
@@ -566,14 +564,14 @@ def main(session, use_raytracing=True):
             os.makedirs(path_dir, exist_ok=True)
             
             logging.info(f"Visualizing individual path: {system} - {category} - {path_data['pair']}")
-            visualize_single_path(session, system, category, path_data, path_dir, residue_mapping, use_raytracing)
+            visualize_single_path(session, system, category, path_data, path_dir, residue_mapping)
 
-    # Generate combined visualizations (original functionality)
-    logging.info(f"Starting combined path visualizations (raytracing: {use_raytracing})...")
+    # Generate combined visualizations
+    logging.info("Starting combined path visualizations...")
     for (system, category), paths in grouped_paths.items():
         logging.info(f"Visualizing {system} - {category.replace('_', ' ')}...")
         residue_mapping = wt_mapping if system == 'WT' else mutant_mapping
-        visualize_paths(session, system, category, paths, base_output_dir, residue_mapping, use_raytracing)
+        visualize_paths(session, system, category, paths, base_output_dir, residue_mapping)
 
     # Generate combined visualizations for high contact categories
     for system in ['WT', 'Mutant']:
@@ -586,6 +584,7 @@ def main(session, use_raytracing=True):
         
         if combined_paths:
             residue_mapping = wt_mapping if system == 'WT' else mutant_mapping
-            visualize_paths(session, system, 'combined_high_contact', combined_paths, base_output_dir, residue_mapping, use_raytracing)
+            visualize_paths(session, system, 'combined_high_contact', combined_paths, base_output_dir, residue_mapping)
 
+# Call main function with session
 main(session)
