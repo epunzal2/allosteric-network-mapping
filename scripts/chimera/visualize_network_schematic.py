@@ -16,6 +16,9 @@ if script_dir not in sys.path:
 
 from visualize_residues_schematic import visualize_residues
 
+# Global flag to track which method works for this ChimeraX version
+_tube_method = None
+
 def parse_optimal_paths(markdown_file):
     """
     Parses the optimal path data from a markdown file.
@@ -104,61 +107,48 @@ def get_resname(atomic_model, resid, chain_id=None):
 
     return res.names[mask][0] if mask.any() else ""
 
-# Global flag to track which method works for this ChimeraX version
-_tube_method = None
-
 def setup_wireframe_backbone(session, model_id):
     """
-    Set up wireframe backbone with optimized method detection
+    Set up uniform wireframe backbone using cartoon representation
     """
     global _tube_method
     
-    logging.info("Setting up wireframe backbone...")
+    logging.info("Setting up uniform wireframe backbone...")
     try:
-        # Hide ALL atoms initially - we'll only show specific ones later
+        # Hide ALL atoms initially
         run(session, f"hide {model_id} atoms")
         
-        # Use previously successful method if known
-        if _tube_method == "no_name":
-            cmd = f"shape tube {model_id}@CA radius 0.05 color lightgray"
-            run(session, cmd)
-            run(session, "transparency 85 surfaces")
-            logging.info("Using optimized method (no name parameter)")
-        elif _tube_method == "cartoon":
+        # Use cartoon representation with UNIFORM thickness
+        logging.info("Using cartoon backbone with uniform thickness")
+        
+        try:
+            # Show cartoon representation (ribbon/backbone)
             run(session, f"show {model_id} cartoons")
-            run(session, f"cartoon style {model_id} width 0.03 thickness 0.01")
+            # Force uniform thickness regardless of secondary structure
+            run(session, f"cartoon style {model_id} width 0.15 thickness 0.15")
             run(session, f"color {model_id} lightgray")
-            run(session, f"transparency {model_id} 85")
-            logging.info("Using optimized method (cartoon style)")
-        else:
-            # First time - try methods and remember which works
+            run(session, f"transparency {model_id} 80")
+            logging.info("Uniform cartoon backbone displayed - consistent thickness")
+            _tube_method = "cartoon"
+            
+        except Exception as e:
+            logging.error(f"Failed to create cartoon backbone: {e}")
+            # Fallback: try uniform spheres
             try:
-                # Method 1: Try with name parameter
-                cmd = f"shape tube {model_id}@CA radius 0.05 color lightgray name backbone_tube"
-                run(session, cmd)
-                run(session, "transparency 85 surfaces name backbone_tube")
-                _tube_method = "with_name"
-                logging.info("Method 1 (with name) succeeded - will use this method going forward")
-            except Exception:
-                try:
-                    # Method 2: Try without name parameter
-                    cmd = f"shape tube {model_id}@CA radius 0.05 color lightgray"
-                    run(session, cmd)
-                    run(session, "transparency 85 surfaces")
-                    _tube_method = "no_name"
-                    logging.info("Method 2 (no name) succeeded - will use this method going forward")
-                except Exception:
-                    # Method 3: Use cartoon style
-                    run(session, f"show {model_id} cartoons")
-                    run(session, f"cartoon style {model_id} width 0.03 thickness 0.01")
-                    run(session, f"color {model_id} lightgray")
-                    run(session, f"transparency {model_id} 85")
-                    _tube_method = "cartoon"
-                    logging.info("Method 3 (cartoon) succeeded - will use this method going forward")
+                run(session, f"show {model_id}@CA")
+                run(session, f"style {model_id}@CA sphere")
+                run(session, f"size {model_id}@CA atomRadius 0.1")
+                run(session, f"color {model_id}@CA lightgray")
+                run(session, f"transparency {model_id}@CA 80")
+                logging.info("Fallback: uniform CA spheres displayed")
+                _tube_method = "spheres"
+            except Exception as e2:
+                logging.error(f"All backbone methods failed: {e2}")
+                _tube_method = "none"
         
         # No silhouettes for clean look
         run(session, "graphics silhouettes false")
-        logging.info("Wireframe backbone setup complete")
+        logging.info("Uniform wireframe backbone setup complete")
         return True
         
     except Exception as e:
@@ -252,13 +242,7 @@ def visualize_single_path(session,
     run(session, "hide atoms")
     run(session, "hide cartoons")
     
-    # Set desired orientation
-    run(session, "turn x 90")
-    run(session, "turn z 90")
-    run(session, "turn x 90")
-    run(session, "turn z -10")
-    
-    # Show protein structure properly
+    # Show protein structure properly FIRST
     logging.info("Setting up protein visualization...")
     try:
         # Show all atoms and bonds
@@ -270,42 +254,58 @@ def visualize_single_path(session,
         logging.error(f"Failed to setup protein structure: {e}")
         return
     
+    # Set desired orientation - CONSISTENT for all models (AFTER showing objects)
+    logging.info("Setting consistent orientation for all visualizations")
+    run(session, "view all")  # Reset to default view first (now objects are displayed)
+    run(session, "turn x 90")
+    run(session, "turn z 90")
+    run(session, "turn x 90")
+    run(session, "turn z -10")
+    
     # Set up wireframe backbone
     if not setup_wireframe_backbone(session, model_id):
         return
     
-    # Highlight single path with thick colored tube (translucent)
+    # Highlight single path with THICKER colored tube (translucent)
     try:
         seg = list(dict.fromkeys(path_data["residues"]))
         logging.info(f"Styling single path: residues {seg} with color royalblue")
-        setup_path_tube(session, model_id, seg, "royalblue", "path_tube", 0.45, 40)
+        setup_path_tube(session, model_id, seg, "royalblue", "path_tube", 0.6, 40)  # Increased from 0.45 to 0.6
     except Exception as e:
         logging.error(f"Failed to style path: {e}")
         return
 
-    # Residue 101 as thick magenta tube (more prominent, less transparent)
+    # Residue 101 as SUPER prominent magenta tube (MUCH larger, with white shadow)
     try:
-        setup_path_tube(session, model_id, [101], "magenta", "res101_tube", 0.6, 15)
+        # Create an even larger white shadow for maximum contrast
+        setup_path_tube(session, model_id, [101], "white", "res101_shadow", 1.0, 0)
+        # Create a very prominent magenta tube on top
+        setup_path_tube(session, model_id, [101], "magenta", "res101_tube", 0.9, 0)
         
-        # Add label for residue 101
+        # Add very prominent label for residue 101
         label_txt = residue_mapping.get("101", f"{get_resname(current_model, 101)}101")
-        run(session, f'label {model_id}:101@CA text "{label_txt}" color magenta size 14')
-        logging.info("Residue 101 styled successfully")
+        run(session, f'label {model_id}:101@CA text "{label_txt}" color magenta size 18 height 2.0')
+        logging.info("Residue 101 styled with MAXIMUM visibility (large white shadow + large magenta overlay)")
     except Exception as e:
         logging.error(f"Failed to style residue 101: {e}")
 
-    # Color the second residue in the pair yellow (translucent)
+    # Color the second residue in the pair - SAME PROMINENCE as residue 101
     try:
         # Extract the second residue number from the pair
         pair_parts = path_data['pair'].replace('→', '-').replace(' ', '').split('-')
         if len(pair_parts) >= 2:
             second_residue = int(pair_parts[1])
-            setup_path_tube(session, model_id, [second_residue], "yellow", "second_res_tube", 0.45, 30)
             
-            # Add label for the second residue
+            # Make second residue EQUALLY prominent as residue 101
+            # Create white shadow for maximum contrast
+            setup_path_tube(session, model_id, [second_residue], "white", "second_res_shadow", 1.0, 0)
+            # Create prominent yellow tube on top (same size as magenta res 101)
+            setup_path_tube(session, model_id, [second_residue], "yellow", "second_res_tube", 0.9, 0)
+            
+            # Add very prominent label (same size as res 101)
             label_txt = residue_mapping.get(str(second_residue), f"{get_resname(current_model, second_residue)}{second_residue}")
-            run(session, f'label {model_id}:{second_residue}@CA text "{label_txt}" color yellow size 12')
-            logging.info(f"Second residue {second_residue} styled in yellow")
+            run(session, f'label {model_id}:{second_residue}@CA text "{label_txt}" color yellow size 18 height 2.0')
+            logging.info(f"Second residue {second_residue} styled with MAXIMUM visibility (same as res 101)")
     except Exception as e:
         logging.error(f"Failed to style second residue: {e}")
 
@@ -404,13 +404,7 @@ def visualize_paths(session,
     run(session, "hide atoms")
     run(session, "hide cartoons")
     
-    # Set desired orientation
-    run(session, "turn x 90")
-    run(session, "turn z 90")
-    run(session, "turn x 90")
-    run(session, "turn z -10")
-    
-    # Show protein structure properly
+    # Show protein structure properly FIRST
     logging.info("Setting up protein visualization...")
     try:
         run(session, f"show {model_id}")
@@ -421,16 +415,26 @@ def visualize_paths(session,
         logging.error(f"Failed to setup protein structure: {e}")
         return
     
+    # Set desired orientation - CONSISTENT for all models (AFTER showing objects)
+    logging.info("Setting consistent orientation for all visualizations")
+    run(session, "view all")  # Reset to default view first (now objects are displayed)
+    run(session, "turn x 90")
+    run(session, "turn z 90")
+    run(session, "turn x 90")
+    run(session, "turn z -10")
+    
     # Set up wireframe backbone
     if not setup_wireframe_backbone(session, model_id):
         return
     
     # Thicker translucent colored tubes for network paths
+    # Colors chosen for maximum distinction from each other and from Ca 918 (darkgreen) and residue 101 (magenta)
     palette = [
-        "royalblue","crimson","forestgreen","darkorange","purple","teal",
-        "maroon","darkslateblue","darkgoldenrod","indigo","darkred","brown",
-        "mediumvioletred","darkgreen","chocolate","steelblue","orangered",
-        "darkslategray","darkmagenta","darkblue","darkcyan","darkkhaki"
+        "royalblue","crimson","orange","teal","maroon",
+        "gold","indigo","brown","coral","steelblue",
+        "orangered","darkslategray","darkcyan","darkkhaki","firebrick",
+        "chocolate","wheat","lightcoral","salmon","lightsteelblue",
+        "khaki","tan","navy"
     ]
     
     for i, p in enumerate(paths):
@@ -439,19 +443,22 @@ def visualize_paths(session,
             clr = palette[i % len(palette)]
             
             logging.info(f"Styling path {i+1}: residues {seg} with color {clr}")
-            setup_path_tube(session, model_id, seg, clr, f"path_tube_{i}", 0.45, 50)
+            setup_path_tube(session, model_id, seg, clr, f"path_tube_{i}", 0.6, 50)  # Increased from 0.45 to 0.6
         except Exception as e:
             logging.error(f"Failed to style path {i+1}: {e}")
             continue
 
-    # Residue 101 as thick magenta tube (more prominent) - AFTER paths so it overlays
+    # Residue 101 as SUPER prominent magenta tube (overlays on top of everything)
     try:
-        setup_path_tube(session, model_id, [101], "magenta", "res101_tube", 0.6, 0)
+        # Create an even larger white shadow for maximum contrast  
+        setup_path_tube(session, model_id, [101], "white", "res101_shadow", 1.0, 0)
+        # Create a very prominent magenta tube on top
+        setup_path_tube(session, model_id, [101], "magenta", "res101_tube", 0.9, 0)
         
-        # Add label for residue 101
+        # Add very prominent label for residue 101
         label_txt = residue_mapping.get("101", f"{get_resname(current_model, 101)}101")
-        run(session, f'label {model_id}:101@CA text "{label_txt}" color magenta size 14')
-        logging.info("Residue 101 styled successfully (overlaying paths)")
+        run(session, f'label {model_id}:101@CA text "{label_txt}" color magenta size 18 height 2.0')
+        logging.info("Residue 101 styled with MAXIMUM visibility (large white shadow + large magenta overlay)")
     except Exception as e:
         logging.error(f"Failed to style residue 101: {e}")
 
