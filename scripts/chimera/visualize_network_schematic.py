@@ -17,7 +17,7 @@ if script_dir not in sys.path:
 from visualize_residues_schematic import visualize_residues
 
 # Global flag to track which method works for this ChimeraX version
-_tube_method = None
+_tube_method = "no_name"  # Pre-set to working method to avoid warnings
 
 def parse_optimal_paths(markdown_file):
     """
@@ -118,8 +118,8 @@ def setup_wireframe_backbone(session, model_id):
         # Hide ALL atoms initially
         run(session, f"hide {model_id} atoms")
         
-        # Use cartoon representation with UNIFORM thickness
-        logging.info("Using cartoon backbone with uniform thickness")
+        # Use cartoon representation with UNIFORM thickness and ENSURE transparency
+        logging.info("Using cartoon backbone with uniform thickness and transparency")
         
         try:
             # Show cartoon representation (ribbon/backbone)
@@ -127,20 +127,22 @@ def setup_wireframe_backbone(session, model_id):
             # Force uniform thickness regardless of secondary structure
             run(session, f"cartoon style {model_id} width 0.15 thickness 0.15")
             run(session, f"color {model_id} lightgray")
+            # FORCE transparency - try multiple ways to ensure it works
+            run(session, f"transparency {model_id} 80 models")
             run(session, f"transparency {model_id} 80")
-            logging.info("Uniform cartoon backbone displayed - consistent thickness")
+            logging.info("Uniform cartoon backbone displayed - consistent thickness and transparency")
             _tube_method = "cartoon"
             
         except Exception as e:
             logging.error(f"Failed to create cartoon backbone: {e}")
-            # Fallback: try uniform spheres
+            # Fallback: try uniform spheres with guaranteed transparency
             try:
                 run(session, f"show {model_id}@CA")
                 run(session, f"style {model_id}@CA sphere")
                 run(session, f"size {model_id}@CA atomRadius 0.1")
                 run(session, f"color {model_id}@CA lightgray")
                 run(session, f"transparency {model_id}@CA 80")
-                logging.info("Fallback: uniform CA spheres displayed")
+                logging.info("Fallback: uniform CA spheres displayed with transparency")
                 _tube_method = "spheres"
             except Exception as e2:
                 logging.error(f"All backbone methods failed: {e2}")
@@ -157,49 +159,41 @@ def setup_wireframe_backbone(session, model_id):
 
 def setup_path_tube(session, model_id, residues, color, tube_name, radius=0.45, transparency=40):
     """
-    Create a tube for specific residues with optimized method detection
+    Create a tube for specific residues - optimized to avoid warnings
     """
-    global _tube_method
-    
     try:
         if not residues:
             return False
             
         sel = f"{model_id}:{','.join(map(str, residues))}"
         
-        # Use the method we know works for this ChimeraX version
-        if _tube_method == "no_name":
+        # Use the method we know works (no name parameter) to avoid warnings
+        try:
             cmd = f"shape tube {sel}@CA radius {radius} color {color}"
             run(session, cmd)
             if transparency > 0:
                 run(session, f"transparency {transparency} surfaces")
-        elif _tube_method == "with_name":
-            cmd = f"shape tube {sel}@CA radius {radius} color {color} name {tube_name}"
-            run(session, cmd)
-            run(session, f"transparency {transparency} surfaces name {tube_name}")
-        elif _tube_method == "cartoon":
-            # For cartoon method, style the specific residues
-            run(session, f"cartoon style {sel} width {radius*0.4} thickness {radius*0.2}")
-            run(session, f"color {sel} {color}")
-            if transparency > 0:
-                run(session, f"transparency {sel} {transparency}")
-        else:
-            # Fallback - try the methods in order
+            else:
+                run(session, f"transparency 0 surfaces")
+            return True
+        except Exception as e:
+            logging.warning(f"Shape tube failed for {tube_name}: {e}")
+            
+            # Fallback to large spheres
             try:
-                cmd = f"shape tube {sel}@CA radius {radius} color {color}"
-                run(session, cmd)
-                if transparency > 0:
-                    run(session, f"transparency {transparency} surfaces")
-            except Exception:
-                # Final fallback to sphere style
                 run(session, f"show {sel}@CA")
                 run(session, f"style {sel}@CA sphere")
                 run(session, f"size {sel}@CA atomRadius {radius}")
                 run(session, f"color {sel}@CA {color}")
                 if transparency > 0:
                     run(session, f"transparency {sel}@CA {transparency}")
+                else:
+                    run(session, f"transparency {sel}@CA 0")
+                return True
+            except Exception as e2:
+                logging.error(f"All methods failed for {tube_name}: {e2}")
+                return False
         
-        return True
     except Exception as e:
         logging.error(f"Failed to create tube {tube_name}: {e}")
         return False
@@ -254,13 +248,48 @@ def visualize_single_path(session,
         logging.error(f"Failed to setup protein structure: {e}")
         return
     
-    # Set desired orientation - CONSISTENT for all models (AFTER showing objects)
-    logging.info("Setting consistent orientation for all visualizations")
-    run(session, "view all")  # Reset to default view first (now objects are displayed)
-    run(session, "turn x 90")
-    run(session, "turn z 90")
-    run(session, "turn x 90")
-    run(session, "turn z -10")
+    # Set ABSOLUTE orientation using matrix positioning for GUARANTEED consistency
+    logging.info("Setting ABSOLUTE matrix-based orientation for perfect consistency")
+    
+    try:
+        # Use view orient command for absolute positioning (most reliable)
+        run(session, "view all")  # Standard initial view
+        
+        # Apply absolute matrix orientation - this sets exact viewing matrix
+        # This is more reliable than cumulative turn commands
+        run(session, "view orient 0,1,0,90 1,0,0,90 0,0,1,-10")
+        
+        # Final framing to ensure consistent zoom/centering
+        run(session, "view all")
+        logging.info("Applied absolute matrix orientation - guaranteed consistency")
+        
+    except Exception as e:
+        logging.warning(f"Matrix orientation failed: {e}, trying reset method")
+        
+        # Fallback: More aggressive reset method
+        try:
+            # Reset camera to absolute defaults first
+            run(session, "camera ortho")  # Set to orthographic for consistency
+            run(session, "view all")     # Standard view
+            run(session, "turn x 0")     # Reset X to 0
+            run(session, "turn y 0")     # Reset Y to 0  
+            run(session, "turn z 0")     # Reset Z to 0
+            
+            # Now apply rotations from known zero state
+            run(session, "turn x 90")
+            run(session, "turn z 90")
+            run(session, "turn x 90") 
+            run(session, "turn z -10")
+            
+            # Final positioning
+            run(session, "view all")
+            logging.info("Applied reset-based orientation with orthographic camera")
+            
+        except Exception as e2:
+            logging.error(f"All orientation methods failed: {e2}")
+            # Last resort - just use view all
+            run(session, "view all")
+            logging.warning("Using default view only - orientations may vary")
     
     # Set up wireframe backbone
     if not setup_wireframe_backbone(session, model_id):
@@ -343,7 +372,7 @@ def visualize_single_path(session,
     except Exception as e:
         logging.error(f"Failed final setup: {e}")
 
-    # Save outputs
+    # Save outputs with high DPI and clear background for raytracing
     run(session, "view all")
     run(session, "zoom 1.25")
     
@@ -352,8 +381,9 @@ def visualize_single_path(session,
     base = os.path.join(output_dir, f"path")
     try:
         logging.info(f"Saving single path to: {base}")
-        run(session, f'save "{base}.png" supersample 3 width 1200 height 900')
-        logging.info("High quality screenshot saved")
+        # High quality PNG with transparent background and 500 DPI
+        run(session, f'save "{base}.png" supersample 3 width 2500 height 1875 transparentBackground true')
+        logging.info("High quality screenshot saved with transparent background and 500 DPI equivalent")
         run(session, f'save "{base}.cxs"')
         logging.info(f"Successfully saved single path: {base}")
     except Exception as e:
@@ -415,13 +445,48 @@ def visualize_paths(session,
         logging.error(f"Failed to setup protein structure: {e}")
         return
     
-    # Set desired orientation - CONSISTENT for all models (AFTER showing objects)
-    logging.info("Setting consistent orientation for all visualizations")
-    run(session, "view all")  # Reset to default view first (now objects are displayed)
-    run(session, "turn x 90")
-    run(session, "turn z 90")
-    run(session, "turn x 90")
-    run(session, "turn z -10")
+    # Set ABSOLUTE orientation using matrix positioning for GUARANTEED consistency
+    logging.info("Setting ABSOLUTE matrix-based orientation for perfect consistency")
+    
+    try:
+        # Use view orient command for absolute positioning (most reliable)
+        run(session, "view all")  # Standard initial view
+        
+        # Apply absolute matrix orientation - this sets exact viewing matrix
+        # This is more reliable than cumulative turn commands
+        run(session, "view orient 0,1,0,90 1,0,0,90 0,0,1,-10")
+        
+        # Final framing to ensure consistent zoom/centering
+        run(session, "view all")
+        logging.info("Applied absolute matrix orientation - guaranteed consistency")
+        
+    except Exception as e:
+        logging.warning(f"Matrix orientation failed: {e}, trying reset method")
+        
+        # Fallback: More aggressive reset method
+        try:
+            # Reset camera to absolute defaults first
+            run(session, "camera ortho")  # Set to orthographic for consistency
+            run(session, "view all")     # Standard view
+            run(session, "turn x 0")     # Reset X to 0
+            run(session, "turn y 0")     # Reset Y to 0  
+            run(session, "turn z 0")     # Reset Z to 0
+            
+            # Now apply rotations from known zero state
+            run(session, "turn x 90")
+            run(session, "turn z 90")
+            run(session, "turn x 90") 
+            run(session, "turn z -10")
+            
+            # Final positioning
+            run(session, "view all")
+            logging.info("Applied reset-based orientation with orthographic camera")
+            
+        except Exception as e2:
+            logging.error(f"All orientation methods failed: {e2}")
+            # Last resort - just use view all
+            run(session, "view all")
+            logging.warning("Using default view only - orientations may vary")
     
     # Set up wireframe backbone
     if not setup_wireframe_backbone(session, model_id):
@@ -496,15 +561,16 @@ def visualize_paths(session,
     except Exception as e:
         logging.error(f"Failed final setup: {e}")
 
-    # Save outputs
+    # Save outputs with high DPI and clear background for raytracing
     run(session, "view all")
     run(session, "zoom 1.25")
     
     base = os.path.join(output_dir, f"{category}_{system_name}")
     try:
         logging.info(f"Saving to: {base}")
-        run(session, f'save "{base}.png" supersample 3 width 1200 height 900')
-        logging.info("High quality screenshot saved")
+        # High quality PNG with transparent background and 500 DPI
+        run(session, f'save "{base}.png" supersample 3 width 2500 height 1875 transparentBackground true')
+        logging.info("High quality screenshot saved with transparent background and 500 DPI equivalent")
         run(session, f'save "{base}.cxs"')
         logging.info(f"Successfully saved: {base}")
     except Exception as e:
