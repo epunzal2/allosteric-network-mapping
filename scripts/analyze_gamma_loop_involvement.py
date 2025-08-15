@@ -2,6 +2,7 @@
 
 import argparse
 import re
+import csv
 from pathlib import Path
 import logging
 from typing import Optional, Tuple
@@ -55,6 +56,44 @@ def parse_residue_group(residue_group_str: str) -> set[int]:
                 raise ValueError(f"Invalid residue number: '{part}'. Expected an integer.")
     logger.info(f"Parsed residues: {residues}")
     return residues
+
+
+def load_residue_mapping(mapping_file_path: Path) -> dict[int, str]:
+    """
+    Loads a residue mapping CSV file into a dictionary.
+    """
+    logger.info(f"Loading residue mapping from: {mapping_file_path}")
+    mapping = {}
+    try:
+        with open(mapping_file_path, 'r', newline='', encoding='utf-8-sig') as csvfile:
+            reader = csv.DictReader(csvfile)
+            # Clean up field names to remove any BOM characters
+            reader.fieldnames = [field.strip() for field in reader.fieldnames]
+            for row in reader:
+                try:
+                    resid = int(row['resid'])
+                    mapping[resid] = row['full_orig_label']
+                except (ValueError, KeyError) as e:
+                    logger.warning(f"Skipping row in {mapping_file_path} due to parsing error: {e} - Row: {row}")
+        logger.info(f"Successfully loaded {len(mapping)} residue mappings from {mapping_file_path}.")
+    except FileNotFoundError:
+        logger.error(f"Residue mapping file not found: {mapping_file_path}")
+        # Depending on requirements, you might want to raise the error or return an empty dict
+        # For now, we'll log the error and continue with an empty mapping.
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while reading {mapping_file_path}: {e}", exc_info=True)
+    return mapping
+
+
+def format_residue_with_label(resid: int, residue_map: dict[int, str]) -> str:
+    """
+    Formats a residue ID with its original label if available in the map.
+    """
+    original_label = residue_map.get(resid)
+    if original_label:
+        return f"{resid} ({original_label})"
+    return str(resid)
+
 
 def find_analysis_reports(base_dir: Path) -> list[Path]:
     """
@@ -185,7 +224,9 @@ def generate_markdown_report(
     mutant_summary_entries: list[dict],
     output_path: Path,
     searched_residue_group_str: str,
-    searched_residues: set[int] # Renamed from report_data to all_collected_data
+    searched_residues: set[int], # Renamed from report_data to all_collected_data
+    wt_residue_map: dict[int, str],
+    mutant_residue_map: dict[int, str]
 ):
     """
     Generates a Markdown report from the collected data, including summary statistics.
@@ -223,6 +264,10 @@ def generate_markdown_report(
 
         for summary_type, summary_data in [("WT", wt_summary_entries), ("Mutant", mutant_summary_entries)]:
             f.write(f"### {summary_type} Simulations\n\n")
+            
+            # Select the appropriate residue map
+            residue_map = wt_residue_map if summary_type == "WT" else mutant_residue_map
+
             if not summary_data:
                 f.write(f"- No {summary_type} simulation data found for summary.\n")
                 f.write(f"- **Percentage of pairs with target group (as intermediate) in optimal path:** 0.0% (0 out of 0 pairs)\n\n")
@@ -235,8 +280,8 @@ def generate_markdown_report(
                 # Only list and count if found as intermediate
                 if item['has_target_in_optimal_as_intermediate']:
                     count_has_target_as_intermediate_in_optimal += 1
-                    pair_display = item['input_residue_pair_str']
-                    
+                    pair_display = item.get('input_residue_pair_formatted_str', item['input_residue_pair_str'])
+
                     # Append (N/A...) tag if target overlaps with input
                     if item['is_overlap_with_input']:
                         pair_display += " (N/A - target in input)"
@@ -244,7 +289,18 @@ def generate_markdown_report(
                     # Append found intermediate residues if any
                     found_intermediate_set = item.get('intermediate_target_residues_found', set())
                     if found_intermediate_set: # Check if the set is not empty
-                        found_residues_str = ', '.join(map(str, sorted(list(found_intermediate_set))))
+                        
+                        # Format with original residue labels
+                        formatted_residues = []
+                        for resid in sorted(list(found_intermediate_set)):
+                            original_label = residue_map.get(resid)
+                            if original_label:
+                                formatted_residues.append(f"{resid} ({original_label})")
+                            else:
+                                formatted_residues.append(str(resid))
+                                logger.warning(f"Residue ID {resid} not found in the {summary_type} mapping file.")
+
+                        found_residues_str = ', '.join(formatted_residues)
                         pair_display += f" (Found as intermediate: {found_residues_str})"
                         
                     pairs_with_target_as_intermediate_list.append(pair_display)
@@ -305,7 +361,7 @@ def main():
     parser.add_argument(
         "--output_report_name",
         type=str,
-        default="gamma_loop_analysis_report.md",
+        default="reports/gamma_loop_analysis_report.md",
         help="Name of the output Markdown report file."
     )
     parser.add_argument(
@@ -343,6 +399,12 @@ def main():
     logger.info(f"Script execution started. Logging to console and to: {log_file_path.resolve()}")
     logger.info(f"Arguments parsed: {args}")
 
+    # Load residue mappings
+    wt_mapping_path = PROJECT_ROOT_ALLOSTERIC / "Data" / "residue_mapping_WT.csv"
+    mutant_mapping_path = PROJECT_ROOT_ALLOSTERIC / "Data" / "residue_mapping_Mutant.csv"
+    wt_residue_map = load_residue_mapping(wt_mapping_path)
+    mutant_residue_map = load_residue_mapping(mutant_mapping_path)
+
     try:
         target_residues = parse_residue_group(args.residue_group)
         logger.info(f"Target residues for search: {target_residues}")
@@ -363,7 +425,10 @@ def main():
 
     if not analysis_report_files:
         logger.warning(f"No 'analysis_report.txt' files found in {base_data_dir.resolve()}")
-        generate_markdown_report([], [], [], output_report_path, args.residue_group, target_residues)
+        generate_markdown_report(
+            [], [], [], output_report_path, args.residue_group, target_residues,
+            wt_residue_map, mutant_residue_map
+        )
         logger.info("Generated an empty report as no analysis files were found.")
         return
 
@@ -418,6 +483,20 @@ def main():
         
         input_residues_for_current_sim = set_res1.union(set_res2)
         
+        # Determine which residue map to use for formatting input residues
+        is_mutant_sim = "_MUTANT" in report_file_path.as_posix().upper()
+        active_residue_map = mutant_residue_map if is_mutant_sim else wt_residue_map
+
+        # Create formatted string for the input residue pair
+        formatted_res1_parts = [format_residue_with_label(r, active_residue_map) for r in sorted(list(set_res1))]
+        formatted_res2_parts = [format_residue_with_label(r, active_residue_map) for r in sorted(list(set_res2))]
+        
+        formatted_res1_str = "-".join(formatted_res1_parts)
+        formatted_res2_str = "-".join(formatted_res2_parts)
+        
+        input_residue_pair_formatted_str = f"{formatted_res1_str}_{formatted_res2_str}"
+
+
         is_overlap_with_input = bool(target_residues.intersection(input_residues_for_current_sim))
         if is_overlap_with_input:
             logger.debug(f"Target residues {target_residues} overlap with input pair {input_pair_display_str} (parsed as {input_residues_for_current_sim}) for {relative_sim_path_str}")
@@ -439,6 +518,7 @@ def main():
         
         summary_entry = {
             'input_residue_pair_str': input_pair_display_str,
+            'input_residue_pair_formatted_str': input_residue_pair_formatted_str,
             'is_overlap_with_input': is_overlap_with_input,
             'has_target_in_optimal_as_intermediate': bool(found_target_as_intermediate_in_optimal),
             'intermediate_target_residues_found': found_target_as_intermediate_in_optimal # Store the actual set
@@ -460,7 +540,11 @@ def main():
             logger.warning(f"Path {relative_sim_path_str} too short to categorize for summary.")
 
 
-    generate_markdown_report(all_collected_data, wt_summary_entries, mutant_summary_entries, output_report_path, args.residue_group, target_residues)
+    generate_markdown_report(
+        all_collected_data, wt_summary_entries, mutant_summary_entries,
+        output_report_path, args.residue_group, target_residues,
+        wt_residue_map, mutant_residue_map
+    )
     logger.info("Script execution finished successfully.")
 
 if __name__ == "__main__":
