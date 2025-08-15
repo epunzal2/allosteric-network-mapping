@@ -63,14 +63,11 @@ def create_orig_label_csv(paths_all_file, mapping_file):
         # resid -> full_orig_label
         resid_to_label = pd.Series(mapping_df.full_orig_label.values, index=mapping_df.resid.astype(str)).to_dict()
         
-        # header -> full_orig_label
-        header_to_label = {}
-        for _, row in mapping_df.iterrows():
-            header = f"{row['subunit_greek']}{row['res']}{row['resid_orig']}"
-            header_to_label[header] = row['full_orig_label']
+        # resid -> full_orig_label for columns
+        resid_to_label_map = pd.Series(mapping_df.full_orig_label.values, index=mapping_df.resid.astype(str)).to_dict()
 
         labeled_df = paths_df.map(lambda x: resid_to_label.get(x, x))
-        labeled_df.rename(columns=header_to_label, inplace=True)
+        labeled_df.rename(columns=resid_to_label_map, inplace=True)
 
         output_path = os.path.join(os.path.dirname(paths_all_file), 'paths_all_orig_label.csv')
         labeled_df.to_csv(output_path, index=False)
@@ -120,7 +117,7 @@ def create_comprehensive_csv(root_dir, mapping_wt_path, mapping_mutant_path):
                     path_df = pd.read_csv(file_path)
                     if 'optimal_path_residues' in path_df.columns:
                         residues = path_df['optimal_path_residues'].tolist()
-                        all_paths_data[new_header] = residues
+                        all_paths_data[residue_num] = residues
                         if len(residues) > max_len:
                             max_len = len(residues)
                     else:
@@ -137,7 +134,7 @@ def create_comprehensive_csv(root_dir, mapping_wt_path, mapping_mutant_path):
             comprehensive_df = pd.DataFrame(all_paths_data)
             
             # Sort columns based on the original residue number
-            sorted_headers = sorted(comprehensive_df.columns, key=lambda x: int(''.join(filter(str.isdigit, x))) if ''.join(filter(str.isdigit, x)) else 0)
+            sorted_headers = sorted(comprehensive_df.columns, key=int)
             comprehensive_df = comprehensive_df[sorted_headers]
 
             output_path = os.path.join(subdir, 'paths_all.csv')
